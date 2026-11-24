@@ -2,7 +2,17 @@
 
 A lightweight wallet for membership cards and their barcodes. The goal is a website you can also install as a Progressive Web App (PWA), with your cards available offline after the first visit.
 
+**Mobile first:** optimize for using a phone at the store, in both the mobile browser and installed PWA. All feature specifications, interaction design, performance decisions, and acceptance checks must prioritize the mobile experience. Desktop use remains supported and accessible, but is secondary and must not drive compromises to the phone experience.
+
 **Status:** Design stage. There is no runnable app or deployment yet.
+
+**Planned hosting:** this repository's GitHub Pages site at https://kateiren.github.io/my-memberships/. A GitHub Actions workflow will build, validate, and automatically deploy every push to `main`. Other branches and pull requests will not publish to production.
+
+## First release
+
+The MVP includes manual card creation, editing and deletion, name search, alphabetical ordering, barcode display, offline use, and JSON backup/restore. The interface supports English and German from the start. Categories are optional user-entered values with suggestions from existing categories. Saved locations can be entered as coordinates with an optional label; map and address search come later.
+
+Camera scanning, other-wallet imports, nearby-card ordering, and cloud sync are outside the MVP.
 
 ## Branding
 

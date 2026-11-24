@@ -1,8 +1,41 @@
 # Architecture
 
+## Product priority: mobile first
+
+The primary experience is using a phone at the store, either in a mobile browser or as an installed PWA. Every feature specification and implementation milestone must define and validate its mobile flow first. Desktop remains usable and accessible, but is a secondary experience, not the optimization target.
+
+- Design narrow-screen, touch-first layouts with primary actions reachable one-handed, touch targets at least 44 by 44 CSS pixels, and no hover-only interactions. Preserve keyboard and screen-reader access.
+- Prioritize opening the wallet, finding a card, and displaying a large, unobstructed, scannable barcode with minimal interaction. Do not make card access wait for location lookup, cloud sync, or decorative artwork.
+- Account for phone safe areas, browser chrome, the on-screen keyboard, text enlargement, and orientation changes. Core flows must not require horizontal page scrolling.
+- Keep startup and interactions responsive on mid-range phones and constrained networks. After the first successful load, the core wallet must remain usable offline.
+- Validate on representative iOS Safari and Android Chrome devices, in browser and installed modes where supported. Test mobile file pickers and share sheets, permission prompts, and camera flows on devices rather than relying solely on desktop viewport emulation.
+- Provide responsive desktop layouts and keyboard operation without introducing desktop-only dependencies into core flows. Apply these priorities to future import, nearby-card, and sync specifications as well.
+
+## Agreed MVP scope
+
+- Manual card creation, editing, and deletion; a card list with name search and alphabetical ordering; and a card detail view with barcode display.
+- IndexedDB persistence, an offline app shell, PWA installation where supported, and the app's own JSON backup/restore. Camera scanning, other-wallet imports, nearby-card ordering, and cloud sync are later features, not MVP release requirements.
+- English and German interfaces from the first release. Keep UI strings translatable and use locale-aware sorting and date display; do not translate user-entered card data.
+- An optional user-entered category with suggestions from categories already in the wallet. Dedicated category management, favorites, and custom ordering are deferred.
+- Optional saved locations entered manually as coordinates with an optional label. Map selection and address search are deferred; creating a card must not require a location or location permission.
+- Manual barcode entry with an explicit format selector. Initially support Code 128, EAN-13, EAN-8, and QR. Default the barcode value to the membership number while allowing a separate value. Validate the selected format rather than guessing it or silently substituting another format. Cards without a barcode remain valid.
+
 ## Decision: local-first PWA
 
 Serve a static web app over HTTPS on a stable origin. No app server, wallet database, or My Memberships login is required. The host serves the app assets; reading, editing, and displaying cards happen on the device. A web app manifest and icons support installation where the browser offers it. A service worker caches the app shell for offline use after the first successful load; it does not cache wallet data, cloud API responses, or tokens.
+
+## Decision: GitHub Pages and automated deployment
+
+Host production on this repository's GitHub Pages site at `https://kateiren.github.io/my-memberships/`. Use GitHub Actions runners for build and deployment automation; they are not an application backend.
+
+- Automatically build, run required checks, and deploy on every push to `main`, without path filters that skip commits. Only publish a successfully validated build; failed checks must leave the existing deployment intact.
+- Pull requests and other branches must not deploy to production.
+- Configure Pages to deploy through GitHub Actions, using a Pages artifact and the official Pages deployment actions. Restrict deployment permissions to the deployment job and use the `github-pages` environment.
+- Serialize production deployments so an older build cannot replace a newer deployed commit.
+- Configure asset URLs, navigation, manifest start URL and scope, and service-worker registration and scope for the `/my-memberships/` base path, not the domain root. Use navigation compatible with static Pages hosting; do not assume server-side SPA rewrites.
+- Verify the deployed site, installation, and offline behavior at the actual Pages URL. Publishing a new version must not clear the local wallet; already-installed clients follow the service-worker update flow rather than receiving an immediate forced reload.
+
+The workflow will be added with the runnable MVP; deployment is not configured yet.
 
 ## Wallet storage
 
@@ -54,11 +87,19 @@ Track the last successfully synced snapshot and remote revision per connected ac
 
 ## Implementation milestones
 
-1. **Wallet:** build the web UI, IndexedDB storage for all planned card details (including two brand colors and multiple locations), and barcode display. Verify that card creation, editing, and deletion survive reloads without an account or network requests for card data.
-2. **PWA and backup:** add installation, offline app shell, and export/restore. Test a first online load followed by offline use, a restore in a clean browser profile, and invalid imports leaving the existing wallet untouched. Check installation and file selection on representative Android, iOS, and desktop browsers.
+1. **Wallet:** build the mobile-first web UI, IndexedDB storage for all planned card details (including two brand colors and multiple locations), and barcode display. Verify that card creation, editing, and deletion survive reloads without an account or network requests for card data. Validate touch operation, narrow-screen layouts, accessibility, and barcode scanning from a phone display; also check desktop usability.
+2. **PWA and backup:** add installation, offline app shell, and export/restore. Test a first online load followed by offline use, a restore in a clean browser profile, and invalid imports leaving the existing wallet untouched. Prioritize installation, file selection, and export/share flows on Android and iOS devices, with secondary desktop compatibility checks.
 3. **Cloud sync:** prototype one provider at a time. Verify account consent, token expiry, offline edits, conflicts between two devices, and disconnect/reconnect before rollout. Review whether users should be able to encrypt cloud snapshots before enabling sync.
 
 Additional later milestones:
 
 - **Card imports:** implement camera scanning, Stocard backup import, and other-wallet adapters as supported formats are verified. Test camera denial, unsupported barcodes and formats, field mapping, duplicate handling, and malformed files without changing existing cards.
 - **Nearby cards:** implement opt-in foreground positioning, saved-location matching, and nearby-business lookup. Test permission denial, unavailable positioning, offline use, lookup failures, false business matches, multiple locations per card, and multiple matching cards appearing above non-matching cards when the app opens.
+
+## Engineering decisions to close before MVP implementation
+
+- **Toolchain:** select the UI/build stack, barcode renderer, and test tooling. Hosting and deployment are decided above: GitHub Pages at `/my-memberships/`, deployed by GitHub Actions.
+- **Data contract:** define required versus optional fields, defaults for the two colors, field and import-size limits, coordinate ranges, barcode constraints, timestamp representation, duplicate-ID handling on restore, and database/backup version compatibility. Define whether a later membership-number edit also changes a defaulted barcode value.
+- **Interaction details:** specify empty states, no search results, validation errors, deletion confirmation or undo, unsaved edits, and language selection/fallback. Ensure labels remain readable against user-selected brand colors.
+- **Failure and update behavior:** specify actionable storage-unavailable, quota, and save-error states without reporting unsaved changes as saved. Define multi-tab edit/restore coordination and a service-worker update flow that avoids losing edits or mixing incompatible app and database versions.
+- **Release checks:** choose supported browser/OS versions and measurable mobile startup and interaction budgets. Add automated coverage for persistence, barcode validation, backup round-trips, invalid imports, and both languages, alongside real-device offline, accessibility, and barcode-scannability checks.
