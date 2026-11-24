@@ -4,9 +4,39 @@ A lightweight wallet for membership cards and their barcodes. The goal is a webs
 
 **Mobile first:** optimize for using a phone at the store, in both the mobile browser and installed PWA. All feature specifications, interaction design, performance decisions, and acceptance checks must prioritize the mobile experience. Desktop use remains supported and accessible, but is secondary and must not drive compromises to the phone experience.
 
-**Status:** Design stage. There is no runnable app or deployment yet.
+**Status:** Initial MVP implemented. Local automated checks cover the wallet and offline browser flows; real-device release checks and the first production deployment are still required.
 
-**Planned hosting:** this repository's GitHub Pages site at https://kateiren.github.io/my-memberships/. A GitHub Actions workflow will build, validate, and automatically deploy every push to `main`. Other branches and pull requests will not publish to production.
+**Hosting:** this repository's GitHub Pages site at https://kateiren.github.io/my-memberships/. The [deployment workflow](.github/workflows/pages.yml) builds, tests, and deploys pushes to `main`. Enable **Settings → Pages → Build and deployment → Source: GitHub Actions** before the first deployment. Other branches and pull requests do not publish to production.
+
+## Run locally
+
+Use Node.js 22.12 or newer and npm.
+
+```sh
+npm ci
+npm run dev
+```
+
+Open the printed URL at `/my-memberships/`. Development mode does not install a service worker. For the production PWA and offline behavior:
+
+```sh
+npm run build
+npm run preview
+```
+
+### Checks
+
+```sh
+npm run check
+npm test
+npx playwright install chromium webkit
+npm run build
+npm run test:e2e
+```
+
+Browser tests run against the production build in Android/Chromium and iPhone/WebKit emulation, covering card editing, search, backup/restore, language selection, narrow screens, offline reloads, and conflicting edits across tabs. They do not replace testing installation, file handling, and barcode scanning on physical phones.
+
+The asset script generates optimized artwork and PWA icons from the original branding images before development and production builds. Generated assets are not committed.
 
 ## First release
 
@@ -23,7 +53,7 @@ Keep these original images as branding sources; generate app-icon sizes from the
 
 ## Planned card details
 
-Each membership card will store:
+Each membership card stores:
 
 - Its name and membership number (preserving leading zeros).
 - A description and category.

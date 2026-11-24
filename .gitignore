@@ -1,6 +1,10 @@
 /node_modules/
 /dist/
 /coverage/
+/public/icons/
+/public/branding/
+/playwright-report/
+/test-results/
 *.log
 
 .env
