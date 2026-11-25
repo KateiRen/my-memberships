@@ -15,6 +15,22 @@ async function open(name = crypto.randomUUID()): Promise<WalletStore> {
 }
 afterEach(() => { connections.splice(0).forEach((store) => store.close()); });
 describe('transactional wallet storage', () => {
+  it('remembers both location opt-in and refusal independently from wallet replacement and language', async () => {
+    const name = crypto.randomUUID();
+    const first = await open(name);
+    expect(await first.nearbyEnabled()).toBeUndefined();
+    await first.setLanguage('de');
+    await first.setNearbyEnabled(false);
+    await first.replace([card], 0);
+    first.close();
+    const second = await open(name);
+    expect(await second.nearbyEnabled()).toBe(false);
+    expect(await second.language()).toBe('de');
+    await second.setNearbyEnabled(true);
+    await second.replace([], 1);
+    second.close();
+    expect(await (await open(name)).nearbyEnabled()).toBe(true);
+  });
   it('persists cards and language after reopening, and supports edits and deletion', async () => {
     const name = crypto.randomUUID();
     const first = await open(name);

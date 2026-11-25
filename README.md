@@ -34,7 +34,7 @@ npm run build
 npm run test:e2e
 ```
 
-Browser tests run against the production build in Android/Chromium and iPhone/WebKit emulation, covering card editing, search, backup/restore, language selection, narrow screens, offline reloads, conflicting edits across tabs, and camera-denial fallback. Chromium additionally exercises automatic decoding of all four supported formats through synthetic camera streams, including long QR values. They do not replace testing installation, file handling, and barcode scanning on physical phones.
+Browser tests run against the production build in Android/Chromium and iPhone/WebKit emulation, covering card editing, search, backup/restore, language selection, narrow screens, offline reloads, and conflicting edits across tabs. They do not replace testing installation, file handling, and barcode scanning on physical phones.
 
 The asset script generates optimized artwork and PWA icons from the original branding images before development and production builds. Generated assets are not committed.
 
@@ -42,9 +42,17 @@ The asset script generates optimized artwork and PWA icons from the original bra
 
 The MVP includes manual card creation, editing and deletion, name search, alphabetical ordering, barcode display, offline use, and JSON backup/restore. The interface supports English and German from the start. Categories are optional user-entered values with suggestions from existing categories. Saved locations can be entered as coordinates with an optional label; map and address search come later.
 
-Adding a card opens the rear camera where available and automatically reads QR, Code 128, EAN-13, and EAN-8 codes on the device. Review the detected format and value and complete the card details before saving. Camera access requires HTTPS (or localhost); images are never saved or uploaded. Manual entry remains available while scanning and if camera access is denied or unavailable. Physical-phone camera checks are still required.
+Camera scanning, other-wallet imports, nearby-business lookup, and cloud sync are outside the MVP.
 
-Other-wallet imports, nearby-card ordering, and cloud sync remain deferred.
+## Nearby cards
+
+Tap **Enable nearby cards** in the wallet or settings to allow location access. Once browser permission is granted, opening or returning to the app checks your position without delaying card access. All cards with a saved location within **200 metres** appear first, with alphabetical ordering within the nearby and remaining groups. Search still works as usual.
+
+When viewing a card, a small location-pin button lets you **save the current location** if that card has no saved location within 200 metres. It disappears after saving or when an existing saved location covers the area. The button requires a recent position accurate to 200 metres or better; it is not shown when location is denied, unavailable, or the card already has 50 locations. Saved points can be edited or removed in the card editor and are included in backups.
+
+Restoring a backup containing locations asks whether to enable nearby suggestions if no decision has been recorded. Accepting requests browser permission; declining is remembered without requesting it. Your choice is saved on this device independently of wallet backups. Settings show whether location is enabled, disabled in the app, not yet enabled, or blocked by the browser. You can turn it off or **Ask for location access again** after a refusal. A browser-level block may need to be removed in the browser's site settings before another request can succeed. Turning the feature off prevents automatic location checks even if browser permission remains granted. Browsers without geolocation-permission queries require manual activation for each visit.
+
+Matching runs on your device without external store searches, background tracking, or a position history. Denied, unavailable, timed-out, or imprecise positioning leaves normal alphabetical ordering available. Physical-phone location and permission checks remain required.
 
 ## Branding
 
@@ -61,14 +69,14 @@ Each membership card stores:
 - A description and category.
 - The date it was added.
 - Two brand colors.
-- Multiple saved locations, for automatically bringing the card to the top when nearby once location-based sorting is available.
+- Multiple saved locations, for bringing the card to the top when nearby suggestions are enabled.
 
 Cards will also support barcode display.
 
 ## Later features
 
-- Import cards by reading a Stocard backup or supported exports from other wallets. Supported backup formats will need to be verified during implementation.
-- With the user's permission, check their position when opening the app and look up nearby stores or businesses associated with cards already in their wallet. Matching cards will appear at the very top. Saved card locations will also support nearby matching; location access will remain optional.
+- Import cards by scanning with the camera, reading a Stocard backup, or reading supported exports from other wallets. Supported backup formats will need to be verified during implementation.
+- Look up nearby stores or businesses associated with cards already in the wallet. Matching against explicitly saved locations is already supported; external business discovery remains deferred.
 
 ## Where your cards will live
 

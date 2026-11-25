@@ -14,7 +14,7 @@ The primary experience is using a phone at the store, either in a mobile browser
 ## Agreed MVP scope
 
 - Manual card creation, editing, and deletion; a card list with name search and alphabetical ordering; and a card detail view with barcode display.
-- IndexedDB persistence, an offline app shell, PWA installation where supported, and the app's own JSON backup/restore. Camera-first card creation is now implemented as an enhancement; other-wallet imports, nearby-card ordering, and cloud sync remain deferred.
+- IndexedDB persistence, an offline app shell, PWA installation where supported, and the app's own JSON backup/restore. Opt-in nearby ordering using saved locations is an implemented enhancement. Camera scanning, other-wallet imports, nearby-business discovery, and cloud sync remain later features.
 - English and German interfaces from the first release. Keep UI strings translatable and use locale-aware sorting and date display; do not translate user-entered card data.
 - An optional user-entered category with suggestions from categories already in the wallet. Dedicated category management, favorites, and custom ordering are deferred.
 - Optional saved locations entered manually as coordinates with an optional label. Map selection and address search are deferred; creating a card must not require a location or location permission.
@@ -46,7 +46,7 @@ The workflow is implemented in [pages.yml](.github/workflows/pages.yml). It runs
   - Description and category.
   - Date added, recorded at creation and preserved through edits, backup, and restore.
   - Two brand colors.
-  - A list of saved locations, each with coordinates and an optional label or address. Allow multiple locations per card; these are inputs to the later nearby-card sorting feature.
+  - A list of saved locations, each with coordinates and an optional label or address. Allow multiple locations per card; these are inputs to opt-in nearby-card suggestions.
   - Optional barcode format and value.
 - Render supported barcodes locally. Use a versioned database schema with migrations and keep storage logic separate from the UI. Include all card details and saved locations in the versioned backup format.
 - Storage belongs to the browser profile and origin. Different devices, browsers, or origins do not automatically share a wallet. Request persistent storage when supported, but explain that clearing site data, browser eviction, or losing a device can still erase cards. Installing the PWA is not a backup.
@@ -57,23 +57,31 @@ Export a JSON snapshot with a format version and a cards array (suggested filena
 
 On restore, validate the version, size, and card fields before writing anything. Show a preview and ask before replacing an existing wallet; apply the replacement atomically so a failed import leaves the existing wallet intact. Treat imported values as data, not HTML. Tell users that exports are readable JSON containing their membership numbers and barcodes; do not log or send those values to analytics. Keep third-party scripts out of the core app and use a restrictive Content Security Policy.
 
-## Camera-first card creation
+## Later: camera and other-wallet imports
 
-Adding a card starts camera capture, preferring the phone's rear camera, and continuously attempts local decoding of Code 128, EAN-13, EAN-8, and QR codes with bundled ZXing code. It does not depend on the browser's native BarcodeDetector API. Manual entry and cancellation remain available without waiting for camera permission or a successful scan. Camera denial, unavailable capture, and decoding failures are explained in English and German.
-
-The decoder is loaded on demand, with a separate 35 KiB gzip JavaScript budget. The existing 100 KiB core JavaScript, 10 KiB CSS, and 1 MiB total static-build budgets remain unchanged. The service worker precaches the decoder for offline scanning.
-
-A successful scan stops capture and opens the editor with the exact detected format and value for review. The membership number is prefilled only when the value fits its 200-character limit; longer QR values remain intact in the separate barcode field. Nothing is saved until the user completes and submits the form. Editing an existing card does not request camera access. Navigation away from capture, hiding the app, and leaving the page stop camera tracks, including streams returned after cancellation. No captured images are persisted or uploaded. Camera access requires HTTPS or localhost; physical iOS and Android checks remain a release requirement.
-
-## Later: other-wallet imports
-
-Support importing a Stocard backup and supported exports from other wallets. These are separate from restoring the app's own JSON backup. Verify available export formats and compatibility before claiming support; do not assume every wallet exposes an importable backup.
+Support adding cards by scanning a barcode with the camera, importing a Stocard backup, and importing supported exports from other wallets. These are separate from restoring the app's own JSON backup. Verify available export formats and compatibility before claiming support; do not assume every wallet exposes an importable backup.
 
 Request camera access only when scanning and retain manual entry if permission is denied or scanning is unsupported. Decode supported barcodes on the device and let the user review or complete card details before saving. For file imports, map available source fields into the card model, preserve the original date added when provided, and record the import date otherwise. Preview imported cards and resolve duplicates with the user rather than silently replacing existing cards. Apply the same input validation and data-handling protections as backup restore.
 
-## Later: location-aware card ordering
+## Saved-location suggestions
 
-With explicit opt-in and browser location permission, check the user's current position when opening the app. Match against saved card locations and look up nearby stores or businesses associated with cards already in the wallet. Bring matching cards to the very top without adding unrelated cards or permanently changing the user's normal ordering.
+Nearby suggestions are opt-in through an **Enable nearby cards** action in the wallet and settings. There is no automatic browser permission prompt at startup. When the browser reports existing geolocation permission as granted and the feature is not explicitly disabled, request a foreground position when opening or returning to the app, or opening a card with an expired fix. Location reads must not block opening cards or editing. If permission queries are unavailable or fail, explain that manual activation is required for that visit rather than triggering an unexpected prompt.
+
+Use the same **200-metre inclusive great-circle-distance threshold** for matching saved locations and detecting an already-saved area. A fix is usable only when its accuracy is at most 200 metres and it is no more than 60 seconds old. Requests ask for high accuracy, no cached position, and a 10-second timeout. Denied, unavailable, imprecise, and timed-out positioning are explained, clear suggestions, and retain alphabetical ordering. Discard the in-memory position when hidden, expired, disabled, or permission is revoked; ignore late callbacks after revocation or hiding. Do not retain position history or continuously watch location.
+
+All matching cards precede non-matching cards, with existing locale-aware alphabetical ordering within each group. Preserve name filtering, and never write the temporary ordering into the wallet. Multiple saved locations and multiple matching cards are supported, including offline use when the device can supply a position. No place-data service or network business lookup is used.
+
+On the card detail screen, show a small location-pin action with an accessible label and a minimum 44-by-44-pixel touch target only when a usable fix is available, no saved location on that card is within 200 metres, and the card has fewer than 50 locations. On activation, refresh the fix and recheck duplicates and limits before saving an unlabeled coordinate pair through the normal revision-checked wallet transaction. Report success only after persistence. Card details, barcode data, and date added stay unchanged. Saved coordinates remain editable and are included in the existing backup format.
+
+Store explicit nearby opt-in or refusal as a boolean under `nearby-enabled` in the existing IndexedDB preferences store, separately from language and wallet snapshots; no database or backup schema version change is needed. A successful restore containing saved locations offers nearby suggestions if the user has not made a decision and browser permission is not already granted or denied. Accepting saves opt-in and requests browser permission; refusal is persisted without requesting browser location. Native permission denial also disables nearby suggestions. Repeated restores must not repeat a declined prompt, and restoring a backup must not overwrite this device's preference. Settings allow re-enabling or disabling the feature; disabled means no automatic reads even with browser permission still granted.
+
+Physical Android and iOS checks remain necessary for GPS accuracy, permission prompts and revocation, app resume, narrow-screen touch targets, and installed-PWA behavior.
+
+Settings display an explicit enabled, app-disabled, not-yet-enabled, or browser-blocked location indicator. Allow disabling active suggestions and requesting permission again after refusal. Browsers cannot be forced to repeat a blocked native prompt; explain how to allow location through browser site settings before retrying.
+
+## Later: nearby-business discovery
+
+Optionally extend saved-location matching with a lookup of nearby stores or businesses associated with cards already in the wallet. Bring matching cards to the very top without adding unrelated cards or permanently changing the user's normal ordering.
 
 Use the browser's foreground geolocation API; do not require background tracking or retain a position history. If permission is denied, location is unavailable, or a nearby-place lookup fails, explain the issue and keep the normal wallet ordering usable. Saved-location matching can work without a place-service request when a position is available; discovering nearby businesses may require network access.
 
@@ -101,8 +109,8 @@ Track the last successfully synced snapshot and remote revision per connected ac
 
 Additional later milestones:
 
-- **Card imports:** implement Stocard backup import and other-wallet adapters as supported formats are verified. Test unsupported formats, field mapping, duplicate handling, and malformed files without changing existing cards.
-- **Nearby cards:** implement opt-in foreground positioning, saved-location matching, and nearby-business lookup. Test permission denial, unavailable positioning, offline use, lookup failures, false business matches, multiple locations per card, and multiple matching cards appearing above non-matching cards when the app opens.
+- **Card imports:** implement camera scanning, Stocard backup import, and other-wallet adapters as supported formats are verified. Test camera denial, unsupported barcodes and formats, field mapping, duplicate handling, and malformed files without changing existing cards.
+- **Nearby businesses:** extend implemented saved-location matching with a separately approved nearby-business lookup. Test lookup failures, false business matches, and ordering when local and external suggestions overlap.
 
 ## MVP implementation choices
 

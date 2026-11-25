@@ -3,7 +3,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { barcodeSvg, backupJson, FORMATS, MAX_BACKUP_BYTES, parseBackup, sortCards, validateCard, WalletError, type Card, type Language, type Snapshot } from './model';
 import { WalletStore } from './storage';
 import { translate, type MessageKey } from './i18n';
-import { startScanner } from './scanner';
+import { hasNearbyLocation, nearbyFirst, requestPosition, LocationError, POSITION_MAX_AGE_MS, type CurrentPosition } from './nearby';
 
 const root = document.querySelector<HTMLDivElement>('#app');
 if (!root) throw new Error('Missing application root');
@@ -19,10 +19,17 @@ let updateAvailable = false;
 let pendingRestore: Card[] | null = null;
 let channel: BroadcastChannel | undefined;
 let notice: { key: MessageKey; error: boolean } | null = null;
-let stopScanner: (() => void) | undefined;
+let position: CurrentPosition | null = null;
+let locationPermission: PermissionState = 'prompt';
+let locationMessage: MessageKey = 'nearbyOptIn';
+let locationRequest: Promise<void> | undefined;
+let locationEpoch = 0;
+let positionExpiry: ReturnType<typeof setTimeout> | undefined;
+let nearbyEnabled: boolean | undefined;
+let nearbyInitialization: Promise<void> | undefined;
 const t = (key: MessageKey) => translate(language, key);
 const escape = (value: string | number) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
-const icon = (name: 'wallet' | 'plus' | 'search' | 'settings' | 'arrow' | 'bag' | 'shield') => {
+const icon = (name: 'wallet' | 'plus' | 'search' | 'settings' | 'arrow' | 'bag' | 'shield' | 'pin') => {
   const paths = {
     wallet: '<rect x="3" y="5" width="18" height="15" rx="3"/><path d="M3 9h18m-5 5h5M7 5V3h11v2"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
@@ -31,6 +38,7 @@ const icon = (name: 'wallet' | 'plus' | 'search' | 'settings' | 'arrow' | 'bag' 
     arrow: '<path d="m14 5-7 7 7 7M7 12h14"/>',
     bag: '<path d="M5 8h14l1 13H4L5 8Z"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/>',
     shield: '<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/>',
+    pin: '<path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/>',
   };
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 };
@@ -53,7 +61,7 @@ function showNotice(key: MessageKey, error = false): void {
   }
 }
 function report(error: unknown, fallback: MessageKey = 'storage'): void {
-  showNotice(error instanceof WalletError ? error.code : fallback, true);
+  showNotice(error instanceof WalletError || error instanceof LocationError ? error.code : fallback, true);
 }
 async function run(action: () => Promise<void>, fallback: MessageKey = 'storage'): Promise<void> {
   if (busy) return;
@@ -76,10 +84,136 @@ function go(next: string): void {
   route = next;
   location.hash = next;
   render();
+  refreshNearbyOnNavigation();
+}
+function freshPosition(): CurrentPosition | null {
+  return nearbyEnabled !== false && locationPermission === 'granted' && position && Date.now() - position.timestamp <= POSITION_MAX_AGE_MS ? position : null;
+}
+function nearbyActionKey(): MessageKey {
+  return locationPermission === 'denied' || nearbyEnabled === false
+    ? 'askLocationAgain' : locationPermission === 'granted' ? 'refreshNearby' : 'enableNearby';
+}
+function nearbyControlsHtml(): string {
+  return `<div class="nearby-controls">
+    <p class="hint" aria-live="polite">${escape(t(locationRequest ? 'locationChecking' : locationMessage))}</p>
+    ${button('enable-nearby', escape(t(nearbyActionKey())), 'text-button', locationRequest ? 'disabled' : '')}
+    ${button('disable-nearby', escape(t('disableNearby')), 'text-button', nearbyEnabled !== false && locationPermission === 'granted' ? '' : 'hidden')}
+    </div>`;
+}
+function locationStateHtml(): string {
+  const state: MessageKey = locationPermission === 'denied' ? 'geoBlocked'
+    : nearbyEnabled === false ? 'geoDisabled' : locationPermission === 'granted' ? 'geoEnabled' : 'geoNotEnabled';
+  return `<span class="location-state ${state === 'geoEnabled' ? 'is-enabled' : ''}">${icon('pin')}${escape(t(state))}</span>`;
+}
+function canSaveLocation(card: Card): boolean {
+  const here = freshPosition();
+  return Boolean(here && !hasNearbyLocation(card, here) && card.locations.length < 50);
+}
+function saveLocationHtml(card: Card): string {
+  return button('save-location', icon('pin'), 'icon-button save-location',
+    `aria-label="${escape(t('saveCurrentLocation'))}" title="${escape(t('saveCurrentLocation'))}" ${canSaveLocation(card) ? '' : 'hidden'}`);
+}
+function updateNearbyUi(): void {
+  const controls = document.querySelector('#nearby-controls');
+  const message = controls?.querySelector('p');
+  if (message) message.textContent = t(locationRequest ? 'locationChecking' : locationMessage);
+  const enable = controls?.querySelector<HTMLButtonElement>('[data-action="enable-nearby"]');
+  if (enable) { enable.textContent = t(nearbyActionKey()); enable.disabled = Boolean(locationRequest); }
+  const disable = controls?.querySelector<HTMLButtonElement>('[data-action="disable-nearby"]');
+  if (disable) disable.hidden = nearbyEnabled === false || locationPermission !== 'granted';
+  const state = document.querySelector('#location-state');
+  if (state) state.innerHTML = locationStateHtml();
+  const action = document.querySelector<HTMLButtonElement>('[data-action="save-location"]');
+  const card = currentCard();
+  if (action && card) action.hidden = !canSaveLocation(card);
+  const grid = document.querySelector('#card-grid');
+  if (grid) grid.innerHTML = listHtml();
+}
+async function refreshLocation(userInitiated = false): Promise<void> {
+  if (locationRequest) return locationRequest;
+  if (document.hidden || nearbyEnabled === false || (!userInitiated && (locationPermission !== 'granted' || freshPosition()))) return;
+  const epoch = locationEpoch;
+  locationRequest = (async () => {
+    try {
+      const here = await requestPosition();
+      if (epoch !== locationEpoch || document.hidden) return;
+      position = here;
+      locationPermission = 'granted';
+      locationMessage = 'nearbyActive';
+      clearTimeout(positionExpiry);
+      positionExpiry = setTimeout(() => {
+        position = null;
+        locationMessage = 'locationStale';
+        updateNearbyUi();
+      }, Math.max(0, POSITION_MAX_AGE_MS - (Date.now() - here.timestamp)));
+    } catch (error) {
+      if (epoch !== locationEpoch || document.hidden) return;
+      clearTimeout(positionExpiry);
+      position = null;
+      if (error instanceof LocationError && error.code === 'locationDenied') {
+        locationPermission = 'denied';
+        try { await setNearbyDecision(false); } catch (storageError) { report(storageError); }
+      }
+      locationMessage = error instanceof LocationError ? error.code : 'locationUnavailable';
+    } finally {
+      locationRequest = undefined;
+      updateNearbyUi();
+    }
+  })();
+  updateNearbyUi();
+  return locationRequest;
+}
+async function setNearbyDecision(enabled: boolean): Promise<void> {
+  if (!store) throw new WalletError('storage');
+  await store.setNearbyEnabled(enabled);
+  nearbyEnabled = enabled;
+  if (!enabled) {
+    locationEpoch++;
+    position = null;
+    clearTimeout(positionExpiry);
+    locationMessage = locationPermission === 'denied' ? 'locationDenied' : 'nearbyDisabled';
+  }
+  updateNearbyUi();
+}
+async function enableNearby(): Promise<void> {
+  await setNearbyDecision(true);
+  await refreshLocation(true);
+}
+async function offerImportedNearby(): Promise<void> {
+  await nearbyInitialization;
+  if (nearbyEnabled !== undefined || !snapshot.cards.some((card) => card.locations.length) || locationPermission === 'granted') return;
+  if (locationPermission === 'denied') { await setNearbyDecision(false); return; }
+  if (confirm(t('importNearbyPrompt'))) await enableNearby();
+  else await setNearbyDecision(false);
+}
+function refreshNearbyOnNavigation(): void {
+  if (route === '' || route.startsWith('card/')) void refreshLocation();
+}
+async function initializeNearby(): Promise<void> {
+  if (!navigator.geolocation) { locationMessage = 'locationUnavailable'; updateNearbyUi(); return; }
+  if (!navigator.permissions?.query) { locationMessage = 'locationPermissionUnknown'; updateNearbyUi(); return; }
+  try {
+    const permission = await navigator.permissions.query({ name: 'geolocation' });
+    const changed = () => {
+      locationPermission = permission.state;
+      if (permission.state === 'granted') void refreshLocation();
+      else {
+        locationEpoch++;
+        clearTimeout(positionExpiry);
+        position = null;
+        locationMessage = nearbyEnabled === false ? 'nearbyDisabled' : permission.state === 'denied' ? 'locationDenied' : 'nearbyOptIn';
+        if (permission.state === 'denied' && nearbyEnabled !== false) void setNearbyDecision(false).catch((error: unknown) => report(error));
+      }
+      updateNearbyUi();
+    };
+    permission.addEventListener('change', changed);
+    changed();
+  } catch {
+    locationMessage = 'locationPermissionUnknown';
+    updateNearbyUi();
+  }
 }
 function shell(content: string): void {
-  stopScanner?.();
-  stopScanner = undefined;
   document.documentElement.lang = language;
   app.innerHTML = `
     <header class="masthead">
@@ -102,19 +236,21 @@ function shell(content: string): void {
 }
 function countLabel(count: number): string { return `${count} ${t(count === 1 ? 'card' : 'cards')}`; }
 function listHtml(): string {
-  const cards = sortCards(snapshot.cards, language, search);
+  const here = freshPosition();
+  const cards = nearbyFirst(sortCards(snapshot.cards, language, search), here);
   if (!cards.length) return `<section class="no-results"><h2>${escape(t('noResults'))}</h2><p>${escape(t('noResultsText'))}</p>${button('clear-search', escape(t('clearSearch')))}</section>`;
   return cards.map((card) => `<a href="#card/${escape(card.id)}" data-route="card/${escape(card.id)}" class="membership-card" aria-label="${escape(t('openCard'))}: ${escape(card.name)}">
       <div class="card-art" style="--color-one:${card.colors[0]};--color-two:${card.colors[1]}">
         <span class="card-emblem">${icon('bag')}</span><span class="card-category">${escape(card.category || t('card'))}</span>
         <span class="card-monogram" aria-hidden="true">${escape(Array.from(card.name)[0] ?? '')}</span>
       </div>
-      <div class="card-caption"><div><h2>${escape(card.name)}</h2><p class="mono">•••• ${escape(card.number.slice(-4))}</p></div><span class="card-open" aria-hidden="true">↗</span></div>
+      <div class="card-caption"><div><h2>${escape(card.name)}</h2>${here && hasNearbyLocation(card, here) ? `<span class="nearby-badge">${icon('pin')}${escape(t('nearbyCard'))}</span>` : ''}<p class="mono">•••• ${escape(card.number.slice(-4))}</p></div><span class="card-open" aria-hidden="true">↗</span></div>
     </a>`).join('');
 }
 function renderList(): void {
   shell(`<section class="page-heading"><div><p class="eyebrow">${escape(t('localNote'))}</p><h1 tabindex="-1">${escape(t('yourCards'))}<span class="count">${snapshot.cards.length}</span></h1></div>
     ${button('new', `${icon('plus')}${escape(t('addCard'))}`, 'button primary desktop-add')}</section>
+    <section id="nearby-controls" aria-label="${escape(t('nearbyTitle'))}">${nearbyControlsHtml()}</section>
     ${snapshot.cards.length ? `<label class="search-box">${icon('search')}<input id="search" type="search" maxlength="100" placeholder="${escape(t('search'))}" aria-label="${escape(t('search'))}" value="${escape(search)}" autocomplete="off"></label>
       <div id="card-grid" class="card-grid">${listHtml()}</div>` : `<section class="empty-state">
       <img src="${import.meta.env.BASE_URL}branding/cards.webp" width="300" height="300" alt="" fetchpriority="low">
@@ -136,38 +272,15 @@ function locationRow(location = { label: '', latitude: '', longitude: '' }): str
     ${field('longitude', 'longitude', String(location.longitude), 'type="number" step="any" min="-180" max="180" required inputmode="decimal"')}</div>
     ${button('remove-location', escape(t('removeLocation')), 'text-button danger')}</fieldset>`;
 }
-function renderScanner(): void {
-  shell(`${backLink()}<section class="page-heading"><h1 tabindex="-1">${escape(t('scanCard'))}</h1></section>
-    <section class="panel camera-panel">
-      <p id="camera-status" role="status">${escape(t('cameraHelp'))}</p>
-      <video id="camera" autoplay muted playsinline aria-label="${escape(t('cameraPreview'))}"></video>
-      <p class="hint">${escape(t('cameraPrivacy'))}</p>
-      <div class="form-actions">${button('manual', escape(t('enterManually')), 'button primary')}${button('cancel', escape(t('cancel')))}</div>
-    </section>`);
-  const video = document.querySelector<HTMLVideoElement>('#camera');
-  if (!video) return;
-  stopScanner = startScanner(video, (barcode) => {
-    route = 'new/manual';
-    location.hash = route;
-    renderEditor(undefined, barcode);
-    dirty = true;
-    showNotice('scanComplete');
-  }, (error) => {
-    const status = document.querySelector('#camera-status');
-    if (status) { status.textContent = t(error); status.setAttribute('role', 'alert'); }
-    video.hidden = true;
-  });
-}
-function renderEditor(card?: Card, scanned?: NonNullable<Card['barcode']>): void {
+function renderEditor(card?: Card): void {
   const colors = card?.colors ?? ['#c5ed76', '#275c4b'];
-  const barcode = scanned ?? card?.barcode;
-  const number = card?.number ?? (scanned && scanned.value.length <= 200 ? scanned.value : '');
+  const barcode = card?.barcode;
   shell(`${backLink()}<section class="page-heading"><div><p class="eyebrow">${escape(t('formIntro'))}</p><h1 tabindex="-1">${escape(t(card ? 'editCard' : 'newCard'))}</h1></div></section>
     <form id="card-form" class="editor" autocomplete="off">
       <p class="muted">${escape(t('requiredNote'))}</p>
       <section class="panel"><h2>${escape(t('cardDetails'))}</h2>
         ${field('name', 'name', card?.name ?? '', `required maxlength="100" placeholder="${escape(t('namePlaceholder'))}"`)}
-        ${field('number', 'number', number, 'required maxlength="200"')}
+        ${field('number', 'number', card?.number ?? '', 'required maxlength="200"')}
         <label class="field"><span>${escape(t('description'))} <small>${escape(t('optional'))}</small></span><textarea name="description" rows="3" maxlength="2000" placeholder="${escape(t('descriptionPlaceholder'))}">${escape(card?.description ?? '')}</textarea></label>
         ${field('category', 'category', card?.category ?? '', `maxlength="60" list="categories" placeholder="${escape(t('categoryPlaceholder'))}"`)}
         <datalist id="categories">${[...new Set(snapshot.cards.map((item) => item.category).filter(Boolean))].sort().map((category) => `<option value="${escape(category)}"></option>`).join('')}</datalist>
@@ -179,8 +292,8 @@ function renderEditor(card?: Card, scanned?: NonNullable<Card['barcode']>): void
       <section class="panel"><h2>${escape(t('barcode'))}</h2><p class="muted">${escape(t('barcodeHelp'))}</p>
         <label class="field"><span>${escape(t('barcodeFormat'))}</span><select name="barcode-format" id="barcode-format"><option value="">${escape(t('noBarcode'))}</option>${FORMATS.map((format) => `<option value="${format}" ${barcode?.format === format ? 'selected' : ''}>${({ code128: 'Code 128', ean13: 'EAN-13', ean8: 'EAN-8', qrcode: 'QR' })[format]}</option>`).join('')}</select></label>
         <div id="barcode-fields" ${barcode ? '' : 'hidden'}>
-          <label class="checkbox"><input type="checkbox" id="same-number" ${!barcode || barcode.value === number ? 'checked' : ''}>${escape(t('sameNumber'))}</label>
-          ${field('barcode-value', 'barcodeValue', barcode?.value ?? number, `maxlength="1024" ${!barcode || barcode.value === number ? 'readonly' : ''}`)}
+          <label class="checkbox"><input type="checkbox" id="same-number" ${!barcode || barcode.value === card?.number ? 'checked' : ''}>${escape(t('sameNumber'))}</label>
+          ${field('barcode-value', 'barcodeValue', barcode?.value ?? card?.number ?? '', `maxlength="1024" ${!barcode || barcode.value === card?.number ? 'readonly' : ''}`)}
           <p class="hint">${escape(t('eanHelp'))}</p>
         </div>
       </section>
@@ -197,7 +310,8 @@ function renderDetail(card: Card): void {
   catch (error) { report(error); }
   shell(`${backLink()}
     <section class="detail-title"><span class="detail-emblem" style="--color-one:${card.colors[0]};--color-two:${card.colors[1]}">${icon('bag')}</span>
-      <p class="eyebrow">${escape(card.category || t('card'))}</p><h1 tabindex="-1">${escape(card.name)}</h1></section>
+      <p class="eyebrow">${escape(card.category || t('card'))}</p><h1 tabindex="-1">${escape(card.name)}</h1>
+      <span id="save-location">${saveLocationHtml(card)}</span></section>
     <section class="scan-panel ${card.barcode?.format === 'qrcode' ? 'qr' : ''}" aria-label="${escape(t('barcode'))}">
       <p class="eyebrow">${escape(t('showToScan'))}</p>
       ${barcode ? `<div class="barcode-image" role="img" aria-label="${escape(t('barcode'))}: ${escape(card.barcode?.value ?? '')}">${barcode}</div><p class="barcode-value mono">${escape(card.barcode?.value ?? '')}</p>` : ''}
@@ -213,6 +327,8 @@ function renderDetail(card: Card): void {
 function renderSettings(): void {
   shell(`<section class="page-heading"><div><p class="eyebrow">MY MEMBERSHIPS</p><h1 tabindex="-1">${escape(t('settings'))}</h1></div></section>
     <section class="panel about-panel">${icon('shield')}<h2>${escape(t('aboutTitle'))}</h2><p>${escape(t('aboutText'))}</p></section>
+    <section class="panel"><h2>${escape(t('nearbyTitle'))}</h2><p id="location-state" aria-live="polite">${locationStateHtml()}</p>
+      <p>${escape(t('nearbyPrivacy'))}</p><div id="nearby-controls">${nearbyControlsHtml()}</div></section>
     <section class="panel"><label class="field"><span>${escape(t('language'))}</span><select id="language"><option value="en" ${language === 'en' ? 'selected' : ''}>English</option><option value="de" ${language === 'de' ? 'selected' : ''}>Deutsch</option></select></label></section>
     <section class="panel"><h2>${escape(t('backupTitle'))}</h2><p>${escape(t('backupText'))}</p><p class="hint">${escape(t('backupWarning'))}</p>
       <div class="stack-actions">${button('export', escape(t('export')), 'button primary')}
@@ -227,8 +343,7 @@ function renderSettings(): void {
 }
 function render(): void {
   if (route === 'settings') renderSettings();
-  else if (route === 'new') renderScanner();
-  else if (route === 'new/manual') renderEditor();
+  else if (route === 'new') renderEditor();
   else {
     const card = currentCard();
     if (card && route.startsWith('edit/')) renderEditor(card);
@@ -287,6 +402,7 @@ app.addEventListener('submit', (event) => {
     location.hash = route;
     showNotice('saved');
     render();
+    refreshNearbyOnNavigation();
   });
 });
 app.addEventListener('input', (event) => {
@@ -350,9 +466,23 @@ app.addEventListener('click', (event) => {
   if (!target || busy) return;
   const action = target.dataset.action;
   if (action === 'new') go('new');
-  if (action === 'manual') go('new/manual');
   if (action === 'cancel') go(currentCard() ? `card/${currentCard()?.id}` : '');
   if (action === 'edit') go(`edit/${currentCard()?.id}`);
+  if (action === 'enable-nearby') void enableNearby().catch((error: unknown) => report(error));
+  if (action === 'disable-nearby') void setNearbyDecision(false).catch((error: unknown) => report(error));
+  if (action === 'save-location') void run(async () => {
+    const card = currentCard();
+    if (!card) throw new WalletError('conflict');
+    await refreshLocation(true);
+    const here = freshPosition();
+    if (!here) { showNotice(locationMessage, true); return; }
+    if (hasNearbyLocation(card, here)) { showNotice('locationAlreadySaved'); updateNearbyUi(); return; }
+    if (card.locations.length >= 50) { showNotice('limitLocations', true); return; }
+    const updated = { ...card, locations: [...card.locations, { label: '', latitude: here.latitude, longitude: here.longitude }] };
+    await commit(snapshot.cards.map((item) => item.id === card.id ? updated : item));
+    showNotice('locationSaved');
+    render();
+  });
   if (action === 'dismiss') { notice = null; document.querySelector('#notices')?.replaceChildren(); }
   if (action === 'clear-search') { search = ''; renderList(); document.querySelector<HTMLInputElement>('#search')?.focus(); }
   if (action === 'add-location') {
@@ -386,6 +516,7 @@ app.addEventListener('click', (event) => {
     pendingRestore = null;
     showNotice('restored');
     renderSettings();
+    void offerImportedNearby().catch((error: unknown) => report(error));
   });
   if (action === 'persist') void run(async () => {
     const granted = await navigator.storage?.persist?.();
@@ -399,15 +530,6 @@ app.addEventListener('click', (event) => {
 window.addEventListener('beforeunload', (event) => {
   if (dirty || busy) { event.preventDefault(); event.returnValue = ''; }
 });
-window.addEventListener('pagehide', () => stopScanner?.());
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden && route === 'new') {
-    stopScanner?.();
-    const status = document.querySelector('#camera-status');
-    if (status) status.textContent = t('cameraPaused');
-    document.querySelector('#camera')?.setAttribute('hidden', '');
-  }
-});
 window.addEventListener('hashchange', () => {
   const next = location.hash.slice(1);
   if (next === route) return;
@@ -419,6 +541,16 @@ window.addEventListener('hashchange', () => {
   pendingRestore = null;
   route = next;
   render();
+  refreshNearbyOnNavigation();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    locationEpoch++;
+    position = null;
+    clearTimeout(positionExpiry);
+    locationMessage = 'locationStale';
+    updateNearbyUi();
+  } else void refreshLocation();
 });
 for (const name of ['online', 'offline']) window.addEventListener(name, () => {
   const connection = document.querySelector('#connection');
@@ -439,12 +571,15 @@ async function start(): Promise<void> {
     });
     snapshot = await store.read();
     language = await store.language() ?? language;
+    nearbyEnabled = await store.nearbyEnabled();
+    if (nearbyEnabled === false) locationMessage = 'nearbyDisabled';
     route = location.hash.slice(1);
     if ('BroadcastChannel' in window) {
       channel = new BroadcastChannel('my-memberships');
       channel.onmessage = () => showNotice('externalChange', true);
     }
     render();
+    nearbyInitialization = initializeNearby();
   } catch (error) { render(); report(error); }
 }
 void start();

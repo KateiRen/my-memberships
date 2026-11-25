@@ -3,7 +3,7 @@ import { validateCards, WalletError, type Language, type Snapshot } from './mode
 
 interface WalletDB extends DBSchema {
   wallet: { key: string; value: Snapshot };
-  preferences: { key: string; value: Language };
+  preferences: { key: string; value: Language | boolean };
 }
 export class WalletStore {
   private constructor(private readonly db: IDBPDatabase<WalletDB>) {}
@@ -37,7 +37,17 @@ export class WalletStore {
     await Promise.all([tx.store.put(next, 'current'), tx.done]);
     return next;
   }
-  language(): Promise<Language | undefined> { return this.db.get('preferences', 'language'); }
+  async language(): Promise<Language | undefined> {
+    const value = await this.db.get('preferences', 'language');
+    if (value !== undefined && value !== 'en' && value !== 'de') throw new WalletError('storage');
+    return value;
+  }
   async setLanguage(language: Language): Promise<void> { await this.db.put('preferences', language, 'language'); }
+  async nearbyEnabled(): Promise<boolean | undefined> {
+    const value = await this.db.get('preferences', 'nearby-enabled');
+    if (value !== undefined && typeof value !== 'boolean') throw new WalletError('storage');
+    return value;
+  }
+  async setNearbyEnabled(enabled: boolean): Promise<void> { await this.db.put('preferences', enabled, 'nearby-enabled'); }
   close(): void { this.db.close(); }
 }
