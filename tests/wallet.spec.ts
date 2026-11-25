@@ -54,6 +54,7 @@ for (const [format, value] of [
     }
     await page.getByRole('textbox', { name: 'Card name', exact: true }).fill('Scanned card');
     await page.getByRole('button', { name: 'Save card', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Scanned card', exact: true })).toBeVisible();
     await page.reload();
     await expect(page.locator('.barcode-value')).toHaveText(value);
   });
