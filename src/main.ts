@@ -3,6 +3,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { barcodeSvg, backupJson, FORMATS, MAX_BACKUP_BYTES, parseBackup, sortCards, validateCard, WalletError, type Card, type Language, type Snapshot } from './model';
 import { WalletStore } from './storage';
 import { translate, type MessageKey } from './i18n';
+import { startScanner } from './scanner';
 
 const root = document.querySelector<HTMLDivElement>('#app');
 if (!root) throw new Error('Missing application root');
@@ -18,6 +19,7 @@ let updateAvailable = false;
 let pendingRestore: Card[] | null = null;
 let channel: BroadcastChannel | undefined;
 let notice: { key: MessageKey; error: boolean } | null = null;
+let stopScanner: (() => void) | undefined;
 const t = (key: MessageKey) => translate(language, key);
 const escape = (value: string | number) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
 const icon = (name: 'wallet' | 'plus' | 'search' | 'settings' | 'arrow' | 'bag' | 'shield') => {
@@ -76,6 +78,8 @@ function go(next: string): void {
   render();
 }
 function shell(content: string): void {
+  stopScanner?.();
+  stopScanner = undefined;
   document.documentElement.lang = language;
   app.innerHTML = `
     <header class="masthead">
@@ -132,15 +136,38 @@ function locationRow(location = { label: '', latitude: '', longitude: '' }): str
     ${field('longitude', 'longitude', String(location.longitude), 'type="number" step="any" min="-180" max="180" required inputmode="decimal"')}</div>
     ${button('remove-location', escape(t('removeLocation')), 'text-button danger')}</fieldset>`;
 }
-function renderEditor(card?: Card): void {
+function renderScanner(): void {
+  shell(`${backLink()}<section class="page-heading"><h1 tabindex="-1">${escape(t('scanCard'))}</h1></section>
+    <section class="panel camera-panel">
+      <p id="camera-status" role="status">${escape(t('cameraHelp'))}</p>
+      <video id="camera" autoplay muted playsinline aria-label="${escape(t('cameraPreview'))}"></video>
+      <p class="hint">${escape(t('cameraPrivacy'))}</p>
+      <div class="form-actions">${button('manual', escape(t('enterManually')), 'button primary')}${button('cancel', escape(t('cancel')))}</div>
+    </section>`);
+  const video = document.querySelector<HTMLVideoElement>('#camera');
+  if (!video) return;
+  stopScanner = startScanner(video, (barcode) => {
+    route = 'new/manual';
+    location.hash = route;
+    renderEditor(undefined, barcode);
+    dirty = true;
+    showNotice('scanComplete');
+  }, (error) => {
+    const status = document.querySelector('#camera-status');
+    if (status) { status.textContent = t(error); status.setAttribute('role', 'alert'); }
+    video.hidden = true;
+  });
+}
+function renderEditor(card?: Card, scanned?: NonNullable<Card['barcode']>): void {
   const colors = card?.colors ?? ['#c5ed76', '#275c4b'];
-  const barcode = card?.barcode;
+  const barcode = scanned ?? card?.barcode;
+  const number = card?.number ?? (scanned && scanned.value.length <= 200 ? scanned.value : '');
   shell(`${backLink()}<section class="page-heading"><div><p class="eyebrow">${escape(t('formIntro'))}</p><h1 tabindex="-1">${escape(t(card ? 'editCard' : 'newCard'))}</h1></div></section>
     <form id="card-form" class="editor" autocomplete="off">
       <p class="muted">${escape(t('requiredNote'))}</p>
       <section class="panel"><h2>${escape(t('cardDetails'))}</h2>
         ${field('name', 'name', card?.name ?? '', `required maxlength="100" placeholder="${escape(t('namePlaceholder'))}"`)}
-        ${field('number', 'number', card?.number ?? '', 'required maxlength="200"')}
+        ${field('number', 'number', number, 'required maxlength="200"')}
         <label class="field"><span>${escape(t('description'))} <small>${escape(t('optional'))}</small></span><textarea name="description" rows="3" maxlength="2000" placeholder="${escape(t('descriptionPlaceholder'))}">${escape(card?.description ?? '')}</textarea></label>
         ${field('category', 'category', card?.category ?? '', `maxlength="60" list="categories" placeholder="${escape(t('categoryPlaceholder'))}"`)}
         <datalist id="categories">${[...new Set(snapshot.cards.map((item) => item.category).filter(Boolean))].sort().map((category) => `<option value="${escape(category)}"></option>`).join('')}</datalist>
@@ -152,8 +179,8 @@ function renderEditor(card?: Card): void {
       <section class="panel"><h2>${escape(t('barcode'))}</h2><p class="muted">${escape(t('barcodeHelp'))}</p>
         <label class="field"><span>${escape(t('barcodeFormat'))}</span><select name="barcode-format" id="barcode-format"><option value="">${escape(t('noBarcode'))}</option>${FORMATS.map((format) => `<option value="${format}" ${barcode?.format === format ? 'selected' : ''}>${({ code128: 'Code 128', ean13: 'EAN-13', ean8: 'EAN-8', qrcode: 'QR' })[format]}</option>`).join('')}</select></label>
         <div id="barcode-fields" ${barcode ? '' : 'hidden'}>
-          <label class="checkbox"><input type="checkbox" id="same-number" ${!barcode || barcode.value === card?.number ? 'checked' : ''}>${escape(t('sameNumber'))}</label>
-          ${field('barcode-value', 'barcodeValue', barcode?.value ?? card?.number ?? '', `maxlength="1024" ${!barcode || barcode.value === card?.number ? 'readonly' : ''}`)}
+          <label class="checkbox"><input type="checkbox" id="same-number" ${!barcode || barcode.value === number ? 'checked' : ''}>${escape(t('sameNumber'))}</label>
+          ${field('barcode-value', 'barcodeValue', barcode?.value ?? number, `maxlength="1024" ${!barcode || barcode.value === number ? 'readonly' : ''}`)}
           <p class="hint">${escape(t('eanHelp'))}</p>
         </div>
       </section>
@@ -200,7 +227,8 @@ function renderSettings(): void {
 }
 function render(): void {
   if (route === 'settings') renderSettings();
-  else if (route === 'new') renderEditor();
+  else if (route === 'new') renderScanner();
+  else if (route === 'new/manual') renderEditor();
   else {
     const card = currentCard();
     if (card && route.startsWith('edit/')) renderEditor(card);
@@ -322,6 +350,7 @@ app.addEventListener('click', (event) => {
   if (!target || busy) return;
   const action = target.dataset.action;
   if (action === 'new') go('new');
+  if (action === 'manual') go('new/manual');
   if (action === 'cancel') go(currentCard() ? `card/${currentCard()?.id}` : '');
   if (action === 'edit') go(`edit/${currentCard()?.id}`);
   if (action === 'dismiss') { notice = null; document.querySelector('#notices')?.replaceChildren(); }
@@ -369,6 +398,15 @@ app.addEventListener('click', (event) => {
 });
 window.addEventListener('beforeunload', (event) => {
   if (dirty || busy) { event.preventDefault(); event.returnValue = ''; }
+});
+window.addEventListener('pagehide', () => stopScanner?.());
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && route === 'new') {
+    stopScanner?.();
+    const status = document.querySelector('#camera-status');
+    if (status) status.textContent = t('cameraPaused');
+    document.querySelector('#camera')?.setAttribute('hidden', '');
+  }
 });
 window.addEventListener('hashchange', () => {
   const next = location.hash.slice(1);

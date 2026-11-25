@@ -1,7 +1,67 @@
 import { expect, test, type Page } from '@playwright/test';
+import { barcodeSvg } from '../src/model';
+import sharp from 'sharp';
+
+test('camera denial keeps manual card creation available', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: () => Promise.reject(new DOMException('Denied', 'NotAllowedError')) },
+    });
+  });
+  await page.goto('./');
+  await page.getByRole('button', { name: 'Add a card', exact: true }).last().click();
+  await expect(page.getByRole('heading', { name: 'Scan your card' })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Camera access was denied');
+  await page.getByRole('button', { name: 'Enter manually', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Card name', exact: true })).toBeVisible();
+});
+
+for (const [format, value] of [
+  ['qrcode', '00042'], ['code128', '000123456789'], ['ean13', '4006381333931'], ['ean8', '96385074'],
+  ['qrcode', 'x'.repeat(201)],
+] as const) {
+  test(`camera automatically reads ${format} (${value.length} characters), stops capture, and saves after review`, async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Synthetic canvas camera requires Chromium captureStream');
+    const imageUrl = `data:image/png;base64,${(await sharp(Buffer.from(barcodeSvg({ format, value }))).png().toBuffer()).toString('base64')}`;
+    await page.addInitScript((imageUrl) => {
+      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+        value: async () => {
+          const image = new Image();
+          image.src = imageUrl;
+          await image.decode();
+          const canvas = document.createElement('canvas');
+          canvas.width = image.naturalWidth;
+          canvas.height = image.naturalHeight;
+          canvas.getContext('2d')!.drawImage(image, 0, 0);
+          const stream = canvas.captureStream(10);
+          for (const track of stream.getTracks()) {
+            const stop = track.stop.bind(track);
+            track.stop = () => { document.documentElement.dataset.cameraStopped = 'true'; stop(); };
+          }
+          return stream;
+        },
+      });
+    }, imageUrl);
+    await page.goto('./');
+    await page.getByRole('button', { name: 'Add a card', exact: true }).last().click();
+    await expect(page.getByRole('textbox', { name: 'Membership number', exact: true })).toHaveValue(value.length <= 200 ? value : '');
+    await expect(page.locator('#barcode-format')).toHaveValue(format);
+    await expect(page.locator('html')).toHaveAttribute('data-camera-stopped', 'true');
+    await expect(page.getByRole('textbox', { name: 'Barcode value', exact: true })).toHaveValue(value);
+    if (value.length > 200) {
+      await page.getByRole('textbox', { name: 'Membership number', exact: true }).fill('00042');
+      await expect(page.getByRole('textbox', { name: 'Barcode value', exact: true })).toHaveValue(value);
+    }
+    await page.getByRole('textbox', { name: 'Card name', exact: true }).fill('Scanned card');
+    await page.getByRole('button', { name: 'Save card', exact: true }).click();
+    await page.reload();
+    await expect(page.locator('.barcode-value')).toHaveText(value);
+  });
+}
 
 async function addCard(page: Page, name = 'Bookshop Rewards'): Promise<void> {
   await page.getByRole('button', { name: 'Add a card', exact: true }).last().click();
+  await page.getByRole('button', { name: 'Enter manually', exact: true }).click();
   await page.getByRole('textbox', { name: 'Card name', exact: true }).fill(name);
   await page.getByRole('textbox', { name: 'Membership number', exact: true }).fill(' 00123456789 ');
   await page.locator('#barcode-format').selectOption('code128');
@@ -67,6 +127,8 @@ test('switches to German, persists it, and fits narrow screens with enlarged tex
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole('button', { name: 'Karte hinzufügen', exact: true }).last().click();
+  await expect(page.getByRole('heading', { name: 'Karte scannen', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Manuell eingeben', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Ein neuer Begleiter' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

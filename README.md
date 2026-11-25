@@ -34,7 +34,7 @@ npm run build
 npm run test:e2e
 ```
 
-Browser tests run against the production build in Android/Chromium and iPhone/WebKit emulation, covering card editing, search, backup/restore, language selection, narrow screens, offline reloads, and conflicting edits across tabs. They do not replace testing installation, file handling, and barcode scanning on physical phones.
+Browser tests run against the production build in Android/Chromium and iPhone/WebKit emulation, covering card editing, search, backup/restore, language selection, narrow screens, offline reloads, conflicting edits across tabs, and camera-denial fallback. Chromium additionally exercises automatic decoding of all four supported formats through synthetic camera streams, including long QR values. They do not replace testing installation, file handling, and barcode scanning on physical phones.
 
 The asset script generates optimized artwork and PWA icons from the original branding images before development and production builds. Generated assets are not committed.
 
@@ -42,7 +42,9 @@ The asset script generates optimized artwork and PWA icons from the original bra
 
 The MVP includes manual card creation, editing and deletion, name search, alphabetical ordering, barcode display, offline use, and JSON backup/restore. The interface supports English and German from the start. Categories are optional user-entered values with suggestions from existing categories. Saved locations can be entered as coordinates with an optional label; map and address search come later.
 
-Camera scanning, other-wallet imports, nearby-card ordering, and cloud sync are outside the MVP.
+Adding a card opens the rear camera where available and automatically reads QR, Code 128, EAN-13, and EAN-8 codes on the device. Review the detected format and value and complete the card details before saving. Camera access requires HTTPS (or localhost); images are never saved or uploaded. Manual entry remains available while scanning and if camera access is denied or unavailable. Physical-phone camera checks are still required.
+
+Other-wallet imports, nearby-card ordering, and cloud sync remain deferred.
 
 ## Branding
 
@@ -65,7 +67,7 @@ Cards will also support barcode display.
 
 ## Later features
 
-- Import cards by scanning with the camera, reading a Stocard backup, or reading supported exports from other wallets. Supported backup formats will need to be verified during implementation.
+- Import cards by reading a Stocard backup or supported exports from other wallets. Supported backup formats will need to be verified during implementation.
 - With the user's permission, check their position when opening the app and look up nearby stores or businesses associated with cards already in their wallet. Matching cards will appear at the very top. Saved card locations will also support nearby matching; location access will remain optional.
 
 ## Where your cards will live

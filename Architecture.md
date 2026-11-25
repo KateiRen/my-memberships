@@ -14,7 +14,7 @@ The primary experience is using a phone at the store, either in a mobile browser
 ## Agreed MVP scope
 
 - Manual card creation, editing, and deletion; a card list with name search and alphabetical ordering; and a card detail view with barcode display.
-- IndexedDB persistence, an offline app shell, PWA installation where supported, and the app's own JSON backup/restore. Camera scanning, other-wallet imports, nearby-card ordering, and cloud sync are later features, not MVP release requirements.
+- IndexedDB persistence, an offline app shell, PWA installation where supported, and the app's own JSON backup/restore. Camera-first card creation is now implemented as an enhancement; other-wallet imports, nearby-card ordering, and cloud sync remain deferred.
 - English and German interfaces from the first release. Keep UI strings translatable and use locale-aware sorting and date display; do not translate user-entered card data.
 - An optional user-entered category with suggestions from categories already in the wallet. Dedicated category management, favorites, and custom ordering are deferred.
 - Optional saved locations entered manually as coordinates with an optional label. Map selection and address search are deferred; creating a card must not require a location or location permission.
@@ -57,9 +57,17 @@ Export a JSON snapshot with a format version and a cards array (suggested filena
 
 On restore, validate the version, size, and card fields before writing anything. Show a preview and ask before replacing an existing wallet; apply the replacement atomically so a failed import leaves the existing wallet intact. Treat imported values as data, not HTML. Tell users that exports are readable JSON containing their membership numbers and barcodes; do not log or send those values to analytics. Keep third-party scripts out of the core app and use a restrictive Content Security Policy.
 
-## Later: camera and other-wallet imports
+## Camera-first card creation
 
-Support adding cards by scanning a barcode with the camera, importing a Stocard backup, and importing supported exports from other wallets. These are separate from restoring the app's own JSON backup. Verify available export formats and compatibility before claiming support; do not assume every wallet exposes an importable backup.
+Adding a card starts camera capture, preferring the phone's rear camera, and continuously attempts local decoding of Code 128, EAN-13, EAN-8, and QR codes with bundled ZXing code. It does not depend on the browser's native BarcodeDetector API. Manual entry and cancellation remain available without waiting for camera permission or a successful scan. Camera denial, unavailable capture, and decoding failures are explained in English and German.
+
+The decoder is loaded on demand, with a separate 35 KiB gzip JavaScript budget. The existing 100 KiB core JavaScript, 10 KiB CSS, and 1 MiB total static-build budgets remain unchanged. The service worker precaches the decoder for offline scanning.
+
+A successful scan stops capture and opens the editor with the exact detected format and value for review. The membership number is prefilled only when the value fits its 200-character limit; longer QR values remain intact in the separate barcode field. Nothing is saved until the user completes and submits the form. Editing an existing card does not request camera access. Navigation away from capture, hiding the app, and leaving the page stop camera tracks, including streams returned after cancellation. No captured images are persisted or uploaded. Camera access requires HTTPS or localhost; physical iOS and Android checks remain a release requirement.
+
+## Later: other-wallet imports
+
+Support importing a Stocard backup and supported exports from other wallets. These are separate from restoring the app's own JSON backup. Verify available export formats and compatibility before claiming support; do not assume every wallet exposes an importable backup.
 
 Request camera access only when scanning and retain manual entry if permission is denied or scanning is unsupported. Decode supported barcodes on the device and let the user review or complete card details before saving. For file imports, map available source fields into the card model, preserve the original date added when provided, and record the import date otherwise. Preview imported cards and resolve duplicates with the user rather than silently replacing existing cards. Apply the same input validation and data-handling protections as backup restore.
 
@@ -93,7 +101,7 @@ Track the last successfully synced snapshot and remote revision per connected ac
 
 Additional later milestones:
 
-- **Card imports:** implement camera scanning, Stocard backup import, and other-wallet adapters as supported formats are verified. Test camera denial, unsupported barcodes and formats, field mapping, duplicate handling, and malformed files without changing existing cards.
+- **Card imports:** implement Stocard backup import and other-wallet adapters as supported formats are verified. Test unsupported formats, field mapping, duplicate handling, and malformed files without changing existing cards.
 - **Nearby cards:** implement opt-in foreground positioning, saved-location matching, and nearby-business lookup. Test permission denial, unavailable positioning, offline use, lookup failures, false business matches, multiple locations per card, and multiple matching cards appearing above non-matching cards when the app opens.
 
 ## MVP implementation choices

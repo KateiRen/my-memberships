@@ -29,7 +29,7 @@ function record(value: unknown): value is Record<string, unknown> {
 function text(value: unknown, max: number, required = false): value is string {
   return typeof value === 'string' && value.length <= max && (!required || value.trim().length > 0);
 }
-function validateBarcode(barcode: NonNullable<Card['barcode']>): void {
+export function validateBarcode(barcode: NonNullable<Card['barcode']>): void {
   if (!FORMATS.includes(barcode.format) || !text(barcode.value, 1024, true)) throw new WalletError('invalidBarcode');
   if (barcode.format === 'qrcode' && new TextEncoder().encode(barcode.value).length > 1024) throw new WalletError('invalidBarcode');
   if (barcode.format === 'code128' && (!/^[\x20-\x7e]+$/.test(barcode.value) || barcode.value.length > 80)) throw new WalletError('invalidBarcode');
@@ -49,7 +49,7 @@ export function barcodeSvg(barcode: NonNullable<Card['barcode']>): string {
     const render = { code128, ean13, ean8, qrcode }[barcode.format];
     return render({
       bcid: barcode.format, text: barcode.value, scale: 3,
-      height: barcode.format === 'qrcode' ? 30 : 18,
+      ...(barcode.format === 'qrcode' ? {} : { height: 18 }),
       includetext: false, padding: 12, backgroundcolor: 'FFFFFF', barcolor: '000000',
     }, drawingSVG());
   } catch {
