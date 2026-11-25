@@ -136,8 +136,8 @@ footer { display: flex; align-items: center; justify-content: center; padding: 2
 .scan-panel { text-align: center; background: #fff; border-radius: 22px; border: 1px solid var(--line); padding: 25px 14px; margin-bottom: 20px; }
 .barcode-image { width: 100%; margin: 12px auto; }
 .barcode-image svg { width: 100%; height: auto; max-height: 220px; display: block; }
-.qr .barcode-image { max-width: 260px; }
-.qr .barcode-image svg { max-height: none; }
+.matrix .barcode-image { max-width: 260px; }
+.matrix .barcode-image svg { max-height: none; }
 .barcode-value { font-size: .85rem; margin: 12px 0 18px; }
 .scan-panel .muted { font-size: .75rem; max-width: 300px; margin: 0 auto; }
 .detail-info dl { margin: 0; }

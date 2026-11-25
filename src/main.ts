@@ -301,7 +301,7 @@ function renderEditor(card?: Card): void {
         ${field('color-two', 'secondaryColor', colors[1], 'type="color" required')}
       </div></section>
       <section class="panel"><h2>${escape(t('barcode'))}</h2><p class="muted">${escape(t('barcodeHelp'))}</p>
-        <label class="field"><span>${escape(t('barcodeFormat'))}</span><select name="barcode-format" id="barcode-format"><option value="">${escape(t('noBarcode'))}</option>${FORMATS.map((format) => `<option value="${format}" ${barcode?.format === format ? 'selected' : ''}>${({ code128: 'Code 128', code39: 'Code 39', ean13: 'EAN-13', ean8: 'EAN-8', qrcode: 'QR' })[format]}</option>`).join('')}</select></label>
+        <label class="field"><span>${escape(t('barcodeFormat'))}</span><select name="barcode-format" id="barcode-format"><option value="">${escape(t('noBarcode'))}</option>${FORMATS.map((format) => `<option value="${format}" ${barcode?.format === format ? 'selected' : ''}>${({ code128: 'Code 128', code39: 'Code 39', ean13: 'EAN-13', ean8: 'EAN-8', qrcode: 'QR', azteccode: 'Aztec' })[format]}</option>`).join('')}</select></label>
         <div id="barcode-fields" ${barcode ? '' : 'hidden'}>
           <label class="checkbox"><input type="checkbox" id="same-number" ${sameNumber ? 'checked' : ''}>${escape(t('sameNumber'))}</label>
           ${field('barcode-value', 'barcodeValue', barcode?.value ?? membershipBarcodeValue(card?.number ?? ''), `maxlength="1024" ${sameNumber ? 'readonly' : ''}`)}
@@ -324,7 +324,7 @@ function renderDetail(card: Card): void {
       <p class="eyebrow">${escape(card.category || t('card'))}</p><h1 tabindex="-1">${escape(card.name)}</h1>
       <span id="save-location">${saveLocationHtml(card)}</span>
       <p id="location-detail-status" class="hint" aria-live="polite">${locationRequest ? escape(t('locationChecking')) : ''}</p></section>
-    <section class="scan-panel ${card.barcode?.format === 'qrcode' ? 'qr' : ''}" aria-label="${escape(t('barcode'))}">
+    <section class="scan-panel ${card.barcode?.format === 'qrcode' || card.barcode?.format === 'azteccode' ? 'matrix' : ''}" aria-label="${escape(t('barcode'))}">
       <p class="eyebrow">${escape(t('showToScan'))}</p>
       ${barcode ? `<div class="barcode-image" role="img" aria-label="${escape(t('barcode'))}: ${escape(card.barcode?.value ?? '')}">${barcode}</div><p class="barcode-value mono preserve-lines">${escape(displayedBarcodeValue)}</p>` : ''}
       <p class="muted">${escape(t(barcode ? 'scanHint' : 'noBarcodeHint'))}</p>

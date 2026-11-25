@@ -315,7 +315,7 @@ test('mobile create, edit, search, reload, and delete preserve card details', as
   await page.getByRole('button', { name: 'Delete card', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'All your memberships. One little wallet.' })).toBeVisible();
 });
-for (const format of ['code128', 'code39', 'ean13', 'ean8', 'qrcode']) {
+for (const format of ['code128', 'code39', 'ean13', 'ean8', 'qrcode', 'azteccode']) {
   test(`${format} preserves membership spacing across save, reload, and edit`, async ({ page }) => {
     const number = format === 'ean13' ? '4006  3813 3393 1' : format === 'ean8' ? '9638  5074' : ' 00  1234 ';
     const compact = number.replace(/\s/g, '');
@@ -326,6 +326,12 @@ for (const format of ['code128', 'code39', 'ean13', 'ean8', 'qrcode']) {
     await expect(page.locator('[name="barcode-value"]')).toHaveValue(compact);
     await page.getByRole('button', { name: 'Save card', exact: true }).click();
     await expect(page.locator('.barcode-image svg')).toBeVisible();
+    if (format === 'qrcode' || format === 'azteccode') {
+      const bounds = await page.locator('.barcode-image svg').boundingBox();
+      if (!bounds) throw new Error('Matrix code is not visible');
+      expect(Math.abs(bounds.width - bounds.height)).toBeLessThanOrEqual(1);
+      expect(bounds.width).toBeLessThanOrEqual(260);
+    }
     const svg = await page.locator('.barcode-image').innerHTML();
     await page.reload();
     expect(await page.locator('dd.mono').textContent()).toBe(number);

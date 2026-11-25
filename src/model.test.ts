@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { backupJson, barcodeSvg, parseBackup, sortCards, validateCard, type Card } from './model';
+import { backupJson, barcodeSvg, MAX_BACKUP_BYTES, parseBackup, sortCards, validateCard, validateCards, type Card } from './model';
 
 function exampleCard(overrides: Partial<Card> = {}): Card {
   return {
@@ -10,9 +10,14 @@ function exampleCard(overrides: Partial<Card> = {}): Card {
   };
 }
 describe('wallet data and backups', () => {
-  it('round-trips every card field without losing leading zeros or dates', () => {
+  it('exports readable, indented JSON and round-trips every field without losing leading zeros or dates', () => {
     const cards = [exampleCard()];
-    expect(parseBackup(backupJson(cards))).toEqual(cards);
+    const backup = backupJson(cards);
+    expect(backup).toMatch(/^\{\n {2}"format":/);
+    expect(backup).toContain('\n  "cards": [\n    {\n      "id":');
+    expect(backup.endsWith('\n')).toBe(true);
+    expect(parseBackup(backup)).toEqual(cards);
+    expect(parseBackup(JSON.stringify(JSON.parse(backup)))).toEqual(cards);
   });
   it.each([
     { version: 2, cards: [] },
@@ -37,6 +42,17 @@ describe('wallet data and backups', () => {
     expect(() => backupJson(large)).toThrow('fileTooLarge');
     expect(() => validateCard(exampleCard({ id: 'card/#route' }))).toThrow('invalidCard');
   });
+  it('counts indentation toward the backup size limit before accepting wallet writes', () => {
+    const cards = Array.from({ length: 2000 }, (_, index) => exampleCard({
+      id: `card-${index}`, name: 'A'.repeat(100), category: 'B'.repeat(60), description: 'C'.repeat(2000),
+    }));
+    const snapshot = { format: 'my-memberships', version: 1, cards };
+    const bytes = (source: string) => new TextEncoder().encode(source).length;
+    expect(bytes(JSON.stringify(snapshot))).toBeLessThan(MAX_BACKUP_BYTES);
+    expect(bytes(JSON.stringify(snapshot, null, 2))).toBeGreaterThan(MAX_BACKUP_BYTES);
+    expect(() => validateCards(cards)).toThrow('fileTooLarge');
+    expect(() => backupJson(cards)).toThrow('fileTooLarge');
+  });
   it('filters names case-insensitively and sorts by locale without mutating input', () => {
     const cards = [exampleCard({ id: 'z', name: 'Zebra' }), exampleCard({ id: 'a', name: 'Äpfel' })];
     expect(sortCards(cards, 'de').map((card) => card.name)).toEqual(['Äpfel', 'Zebra']);
@@ -46,7 +62,7 @@ describe('wallet data and backups', () => {
 });
 describe('barcodes', () => {
   it.each([
-    ['code128', ' 00  1234 '], ['code39', ' 00  AB12 '], ['ean13', '4006 3813 3393 1'], ['ean8', '9638 5074'], ['qrcode', ' 00\u00a012 34 '],
+    ['code128', ' 00  1234 '], ['code39', ' 00  AB12 '], ['ean13', '4006 3813 3393 1'], ['ean8', '9638 5074'], ['qrcode', ' 00\u00a012 34 '], ['azteccode', ' 00\u00a012 34 '],
   ] as const)('preserves membership spacing but encodes %s without whitespace, including restored cards', (format, number) => {
     const card = validateCard(exampleCard({ number, barcode: { format, value: number } }));
     const compact = number.replace(/\s/g, '');
@@ -55,13 +71,15 @@ describe('barcodes', () => {
     expect(barcodeSvg(card.barcode!)).toBe(barcodeSvg({ format, value: compact }));
     expect(parseBackup(backupJson([card]))).toEqual([card]);
   });
-  it('preserves spaces in a separate custom QR value', () => {
-    const card = validateCard(exampleCard({ number: '00 1234', barcode: { format: 'qrcode', value: 'custom value with spaces' } }));
+  it.each(['qrcode', 'azteccode'] as const)('preserves spaces in a separate custom %s value', (format) => {
+    const card = validateCard(exampleCard({ number: '00 1234', barcode: { format, value: 'custom value with spaces' } }));
     expect(card.barcode?.value).toBe('custom value with spaces');
+    expect(parseBackup(backupJson([card]))).toEqual([card]);
   });
   it.each([
     ['code128', '001234'], ['code39', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -.$/+%'],
     ['code39', 'A'.repeat(500)], ['ean13', '4006381333931'], ['ean8', '96385074'], ['qrcode', 'membership:00123'],
+    ['azteccode', 'membership:00123'], ['azteccode', 'é'.repeat(512)],
   ] as const)('renders %s without remote requests', (format, value) => {
     expect(barcodeSvg({ format, value })).toContain('<svg');
   });
@@ -69,6 +87,7 @@ describe('barcodes', () => {
     ['ean13', '4006381333932'], ['ean13', '123'], ['ean8', '96385075'], ['code128', ''], ['code128', '🐈'],
     ['code128', 'a'.repeat(81)], ['code39', ''], ['code39', 'abc'], ['code39', 'ABC*123'],
     ['code39', 'ABC_123'], ['code39', 'Ä'], ['code39', 'A'.repeat(501)], ['qrcode', 'é'.repeat(513)],
+    ['azteccode', ''], ['azteccode', 'é'.repeat(513)],
   ] as const)('rejects invalid %s values instead of changing formats', (format, value) => {
     expect(() => barcodeSvg({ format, value })).toThrow('invalidBarcode');
   });
