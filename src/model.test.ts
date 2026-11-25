@@ -46,13 +46,29 @@ describe('wallet data and backups', () => {
 });
 describe('barcodes', () => {
   it.each([
-    ['code128', '001234'], ['ean13', '4006381333931'], ['ean8', '96385074'], ['qrcode', 'membership:00123'],
+    ['code128', ' 00  1234 '], ['code39', ' 00  AB12 '], ['ean13', '4006 3813 3393 1'], ['ean8', '9638 5074'], ['qrcode', ' 00\u00a012 34 '],
+  ] as const)('preserves membership spacing but encodes %s without whitespace, including restored cards', (format, number) => {
+    const card = validateCard(exampleCard({ number, barcode: { format, value: number } }));
+    const compact = number.replace(/\s/g, '');
+    expect(card.number).toBe(number);
+    expect(card.barcode).toEqual({ format, value: compact });
+    expect(barcodeSvg(card.barcode!)).toBe(barcodeSvg({ format, value: compact }));
+    expect(parseBackup(backupJson([card]))).toEqual([card]);
+  });
+  it('preserves spaces in a separate custom QR value', () => {
+    const card = validateCard(exampleCard({ number: '00 1234', barcode: { format: 'qrcode', value: 'custom value with spaces' } }));
+    expect(card.barcode?.value).toBe('custom value with spaces');
+  });
+  it.each([
+    ['code128', '001234'], ['code39', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -.$/+%'],
+    ['code39', 'A'.repeat(500)], ['ean13', '4006381333931'], ['ean8', '96385074'], ['qrcode', 'membership:00123'],
   ] as const)('renders %s without remote requests', (format, value) => {
     expect(barcodeSvg({ format, value })).toContain('<svg');
   });
   it.each([
     ['ean13', '4006381333932'], ['ean13', '123'], ['ean8', '96385075'], ['code128', ''], ['code128', '🐈'],
-    ['code128', 'a'.repeat(81)], ['qrcode', 'é'.repeat(513)],
+    ['code128', 'a'.repeat(81)], ['code39', ''], ['code39', 'abc'], ['code39', 'ABC*123'],
+    ['code39', 'ABC_123'], ['code39', 'Ä'], ['code39', 'A'.repeat(501)], ['qrcode', 'é'.repeat(513)],
   ] as const)('rejects invalid %s values instead of changing formats', (format, value) => {
     expect(() => barcodeSvg({ format, value })).toThrow('invalidBarcode');
   });

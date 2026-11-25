@@ -1,6 +1,6 @@
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
-import { barcodeSvg, backupJson, FORMATS, MAX_BACKUP_BYTES, parseBackup, sortCards, validateCard, WalletError, type Card, type Language, type Snapshot } from './model';
+import { barcodeSvg, backupJson, FORMATS, MAX_BACKUP_BYTES, membershipBarcodeValue, parseBackup, sortCards, validateCard, WalletError, type Card, type Language, type Snapshot } from './model';
 import { WalletStore } from './storage';
 import { translate, type MessageKey } from './i18n';
 import { nearbyCards, requestPosition, LocationError, POSITION_MAX_AGE_MS, type CurrentPosition } from './nearby';
@@ -285,6 +285,7 @@ function locationRow(location: Card['locations'][number], index: number): string
 function renderEditor(card?: Card): void {
   const colors = card?.colors ?? ['#c5ed76', '#275c4b'];
   const barcode = card?.barcode;
+  const sameNumber = !barcode || barcode.value === membershipBarcodeValue(card?.number ?? '');
   shell(`${backLink()}<section class="page-heading"><div><p class="eyebrow">${escape(t('formIntro'))}</p><h1 tabindex="-1">${escape(t(card ? 'editCard' : 'newCard'))}</h1></div></section>
     <form id="card-form" class="editor" autocomplete="off">
       <p class="muted">${escape(t('requiredNote'))}</p>
@@ -300,10 +301,10 @@ function renderEditor(card?: Card): void {
         ${field('color-two', 'secondaryColor', colors[1], 'type="color" required')}
       </div></section>
       <section class="panel"><h2>${escape(t('barcode'))}</h2><p class="muted">${escape(t('barcodeHelp'))}</p>
-        <label class="field"><span>${escape(t('barcodeFormat'))}</span><select name="barcode-format" id="barcode-format"><option value="">${escape(t('noBarcode'))}</option>${FORMATS.map((format) => `<option value="${format}" ${barcode?.format === format ? 'selected' : ''}>${({ code128: 'Code 128', ean13: 'EAN-13', ean8: 'EAN-8', qrcode: 'QR' })[format]}</option>`).join('')}</select></label>
+        <label class="field"><span>${escape(t('barcodeFormat'))}</span><select name="barcode-format" id="barcode-format"><option value="">${escape(t('noBarcode'))}</option>${FORMATS.map((format) => `<option value="${format}" ${barcode?.format === format ? 'selected' : ''}>${({ code128: 'Code 128', code39: 'Code 39', ean13: 'EAN-13', ean8: 'EAN-8', qrcode: 'QR' })[format]}</option>`).join('')}</select></label>
         <div id="barcode-fields" ${barcode ? '' : 'hidden'}>
-          <label class="checkbox"><input type="checkbox" id="same-number" ${!barcode || barcode.value === card?.number ? 'checked' : ''}>${escape(t('sameNumber'))}</label>
-          ${field('barcode-value', 'barcodeValue', barcode?.value ?? card?.number ?? '', `maxlength="1024" ${!barcode || barcode.value === card?.number ? 'readonly' : ''}`)}
+          <label class="checkbox"><input type="checkbox" id="same-number" ${sameNumber ? 'checked' : ''}>${escape(t('sameNumber'))}</label>
+          ${field('barcode-value', 'barcodeValue', barcode?.value ?? membershipBarcodeValue(card?.number ?? ''), `maxlength="1024" ${sameNumber ? 'readonly' : ''}`)}
           <p class="hint">${escape(t('eanHelp'))}</p>
         </div>
       </section>
@@ -315,6 +316,7 @@ function renderEditor(card?: Card): void {
 }
 function renderDetail(card: Card): void {
   let barcode = '';
+  const displayedBarcodeValue = card.barcode?.value === membershipBarcodeValue(card.number) ? card.number : card.barcode?.value ?? '';
   try { barcode = card.barcode ? barcodeSvg(card.barcode) : ''; }
   catch (error) { report(error); }
   shell(`${backLink()}
@@ -324,10 +326,10 @@ function renderDetail(card: Card): void {
       <p id="location-detail-status" class="hint" aria-live="polite">${locationRequest ? escape(t('locationChecking')) : ''}</p></section>
     <section class="scan-panel ${card.barcode?.format === 'qrcode' ? 'qr' : ''}" aria-label="${escape(t('barcode'))}">
       <p class="eyebrow">${escape(t('showToScan'))}</p>
-      ${barcode ? `<div class="barcode-image" role="img" aria-label="${escape(t('barcode'))}: ${escape(card.barcode?.value ?? '')}">${barcode}</div><p class="barcode-value mono">${escape(card.barcode?.value ?? '')}</p>` : ''}
+      ${barcode ? `<div class="barcode-image" role="img" aria-label="${escape(t('barcode'))}: ${escape(card.barcode?.value ?? '')}">${barcode}</div><p class="barcode-value mono preserve-lines">${escape(displayedBarcodeValue)}</p>` : ''}
       <p class="muted">${escape(t(barcode ? 'scanHint' : 'noBarcodeHint'))}</p>
     </section>
-    <section class="panel detail-info"><dl><div><dt>${escape(t('number'))}</dt><dd class="mono">${escape(card.number)}</dd></div>
+    <section class="panel detail-info"><dl><div><dt>${escape(t('number'))}</dt><dd class="mono preserve-lines">${escape(card.number)}</dd></div>
       ${card.description ? `<div><dt>${escape(t('description'))}</dt><dd class="preserve-lines">${escape(card.description)}</dd></div>` : ''}
       <div><dt>${escape(t('added'))}</dt><dd>${escape(new Intl.DateTimeFormat(language, { dateStyle: 'medium' }).format(new Date(card.addedAt)))}</dd></div>
       ${card.locations.length ? `<div><dt>${escape(t('locations'))}</dt><dd><ul class="location-list">${card.locations.map((item) => `<li>${item.label ? `<strong>${escape(item.label)}</strong><br>` : ''}${escape(item.latitude)}, ${escape(item.longitude)}</li>`).join('')}</ul></dd></div>` : ''}
@@ -366,8 +368,8 @@ function readForm(form: HTMLFormElement): Card {
   const value = (name: string) => String(data.get(name) ?? '');
   const existing = currentCard();
   const format = value('barcode-format');
-  const number = value('number').trim();
-  const barcodeValue = form.querySelector<HTMLInputElement>('#same-number')?.checked ? number : value('barcode-value');
+  const number = value('number');
+  const barcodeValue = form.querySelector<HTMLInputElement>('#same-number')?.checked ? membershipBarcodeValue(number) : value('barcode-value');
   return validateCard({
     id: existing?.id ?? crypto.randomUUID(), name: value('name').trim(), number,
     description: value('description'), category: value('category').trim(),
@@ -427,7 +429,7 @@ app.addEventListener('input', (event) => {
   }
   if (input.getAttribute('name') === 'number' && document.querySelector<HTMLInputElement>('#same-number')?.checked) {
     const barcode = document.querySelector<HTMLInputElement>('[name="barcode-value"]');
-    if (barcode) barcode.value = input.value;
+    if (barcode) barcode.value = membershipBarcodeValue(input.value);
   }
 });
 app.addEventListener('change', (event) => {
@@ -442,7 +444,7 @@ app.addEventListener('change', (event) => {
     const barcode = document.querySelector<HTMLInputElement>('[name="barcode-value"]');
     if (barcode) {
       barcode.readOnly = input.checked;
-      if (input.checked) barcode.value = document.querySelector<HTMLInputElement>('[name="number"]')?.value ?? '';
+      if (input.checked) barcode.value = membershipBarcodeValue(document.querySelector<HTMLInputElement>('[name="number"]')?.value ?? '');
     }
   }
   if (input.id === 'language') void run(async () => {

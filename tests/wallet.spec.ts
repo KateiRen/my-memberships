@@ -315,6 +315,30 @@ test('mobile create, edit, search, reload, and delete preserve card details', as
   await page.getByRole('button', { name: 'Delete card', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'All your memberships. One little wallet.' })).toBeVisible();
 });
+for (const format of ['code128', 'code39', 'ean13', 'ean8', 'qrcode']) {
+  test(`${format} preserves membership spacing across save, reload, and edit`, async ({ page }) => {
+    const number = format === 'ean13' ? '4006  3813 3393 1' : format === 'ean8' ? '9638  5074' : ' 00  1234 ';
+    const compact = number.replace(/\s/g, '');
+    await page.goto('./#new');
+    await page.getByRole('textbox', { name: 'Card name', exact: true }).fill('Spaced membership');
+    await page.getByRole('textbox', { name: 'Membership number', exact: true }).fill(number);
+    await page.locator('#barcode-format').selectOption(format);
+    await expect(page.locator('[name="barcode-value"]')).toHaveValue(compact);
+    await page.getByRole('button', { name: 'Save card', exact: true }).click();
+    await expect(page.locator('.barcode-image svg')).toBeVisible();
+    const svg = await page.locator('.barcode-image').innerHTML();
+    await page.reload();
+    expect(await page.locator('dd.mono').textContent()).toBe(number);
+    expect(await page.locator('.barcode-value').textContent()).toBe(number);
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'Membership number', exact: true })).toHaveValue(number);
+    await expect(page.locator('#same-number')).toBeChecked();
+    await expect(page.locator('[name="barcode-value"]')).toHaveValue(compact);
+    await page.getByRole('textbox', { name: 'Membership number', exact: true }).fill(compact);
+    await page.getByRole('button', { name: 'Save card', exact: true }).click();
+    expect(await page.locator('.barcode-image').innerHTML()).toBe(svg);
+  });
+}
 test('backs up and restores all fields and rejects invalid imports without replacing cards', async ({ page }) => {
   await page.goto('./');
   await addCard(page, '<My & private card>');

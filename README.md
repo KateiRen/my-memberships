@@ -65,7 +65,7 @@ Keep these original images as branding sources; generate app-icon sizes from the
 
 Each membership card stores:
 
-- Its name and membership number (preserving leading zeros).
+- Its name and membership number (preserving leading zeros and spaces exactly as entered). Barcodes and QR codes using the membership number omit whitespace from the encoded value, while the displayed number retains it. Separate custom code values are unchanged.
 - A description and category.
 - The date it was added.
 - Two brand colors.

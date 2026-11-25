@@ -1,6 +1,6 @@
-import { code128, ean13, ean8, qrcode, drawingSVG } from 'bwip-js/browser';
+import { code128, code39, ean13, ean8, qrcode, drawingSVG } from 'bwip-js/browser';
 
-export const FORMATS = ['code128', 'ean13', 'ean8', 'qrcode'] as const;
+export const FORMATS = ['code128', 'code39', 'ean13', 'ean8', 'qrcode'] as const;
 export type BarcodeFormat = typeof FORMATS[number];
 export type Language = 'en' | 'de';
 export interface Location { label: string; latitude: number; longitude: number }
@@ -29,10 +29,14 @@ function record(value: unknown): value is Record<string, unknown> {
 function text(value: unknown, max: number, required = false): value is string {
   return typeof value === 'string' && value.length <= max && (!required || value.trim().length > 0);
 }
+export function membershipBarcodeValue(number: string): string {
+  return number.replace(/\s/g, '');
+}
 function validateBarcode(barcode: NonNullable<Card['barcode']>): void {
   if (!FORMATS.includes(barcode.format) || !text(barcode.value, 1024, true)) throw new WalletError('invalidBarcode');
   if (barcode.format === 'qrcode' && new TextEncoder().encode(barcode.value).length > 1024) throw new WalletError('invalidBarcode');
   if (barcode.format === 'code128' && (!/^[\x20-\x7e]+$/.test(barcode.value) || barcode.value.length > 80)) throw new WalletError('invalidBarcode');
+  if (barcode.format === 'code39' && (!/^[A-Z0-9 .$/+%-]+$/.test(barcode.value) || barcode.value.length > 500)) throw new WalletError('invalidBarcode');
   if (barcode.format === 'ean13' || barcode.format === 'ean8') {
     const digits = barcode.format === 'ean13' ? 13 : 8;
     if (!new RegExp(`^\\d{${digits}}$`).test(barcode.value)) throw new WalletError('invalidBarcode');
@@ -46,7 +50,7 @@ function validateBarcode(barcode: NonNullable<Card['barcode']>): void {
 export function barcodeSvg(barcode: NonNullable<Card['barcode']>): string {
   validateBarcode(barcode);
   try {
-    const render = { code128, ean13, ean8, qrcode }[barcode.format];
+    const render = { code128, code39, ean13, ean8, qrcode }[barcode.format];
     return render({
       bcid: barcode.format, text: barcode.value, scale: 3,
       height: barcode.format === 'qrcode' ? 30 : 18,
@@ -80,7 +84,7 @@ export function validateCard(value: unknown): Card {
     }
     const format = FORMATS.find((format) => format === source.format);
     if (!format) throw new WalletError('invalidBarcode');
-    barcode = { format, value: source.value };
+    barcode = { format, value: source.value === value.number ? membershipBarcodeValue(value.number) : source.value };
     validateBarcode(barcode);
   }
   return {
