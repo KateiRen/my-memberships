@@ -3,7 +3,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { barcodeSvg, backupJson, FORMATS, MAX_BACKUP_BYTES, parseBackup, sortCards, validateCard, WalletError, type Card, type Language, type Snapshot } from './model';
 import { WalletStore } from './storage';
 import { translate, type MessageKey } from './i18n';
-import { hasNearbyLocation, nearbyFirst, requestPosition, LocationError, POSITION_MAX_AGE_MS, type CurrentPosition } from './nearby';
+import { nearbyCards, requestPosition, LocationError, POSITION_MAX_AGE_MS, type CurrentPosition } from './nearby';
 
 const root = document.querySelector<HTMLDivElement>('#app');
 if (!root) throw new Error('Missing application root');
@@ -66,11 +66,11 @@ function report(error: unknown, fallback: MessageKey = 'storage'): void {
 async function run(action: () => Promise<void>, fallback: MessageKey = 'storage'): Promise<void> {
   if (busy) return;
   busy = true;
-  document.querySelectorAll<HTMLButtonElement>('button[type="submit"], [data-action="replace"]').forEach((el) => { el.disabled = true; });
+  document.querySelectorAll<HTMLButtonElement>('button[type="submit"], [data-action="replace"], [data-action="save-location"]').forEach((el) => { el.disabled = true; });
   try { await action(); } catch (error) { report(error, fallback); }
   finally {
     busy = false;
-    document.querySelectorAll<HTMLButtonElement>('button[type="submit"], [data-action="replace"]').forEach((el) => { el.disabled = false; });
+    document.querySelectorAll<HTMLButtonElement>('button[type="submit"], [data-action="replace"], [data-action="save-location"]').forEach((el) => { el.disabled = false; });
   }
 }
 function currentCard(): Card | undefined {
@@ -106,12 +106,11 @@ function locationStateHtml(): string {
   return `<span class="location-state ${state === 'geoEnabled' ? 'is-enabled' : ''}">${icon('pin')}${escape(t(state))}</span>`;
 }
 function canSaveLocation(card: Card): boolean {
-  const here = freshPosition();
-  return Boolean(here && !hasNearbyLocation(card, here) && card.locations.length < 50);
+  return nearbyEnabled !== false && locationPermission === 'granted' && card.locations.length === 0;
 }
 function saveLocationHtml(card: Card): string {
-  return button('save-location', icon('pin'), 'icon-button save-location',
-    `aria-label="${escape(t('saveCurrentLocation'))}" title="${escape(t('saveCurrentLocation'))}" ${canSaveLocation(card) ? '' : 'hidden'}`);
+  return button('save-location', `${icon('pin')}${escape(t('saveCurrentLocation'))}`, 'button secondary save-location',
+    `${canSaveLocation(card) ? '' : 'hidden'} ${busy ? 'disabled' : ''}`);
 }
 function updateNearbyUi(): void {
   const controls = document.querySelector('#nearby-controls');
@@ -125,7 +124,9 @@ function updateNearbyUi(): void {
   if (state) state.innerHTML = locationStateHtml();
   const action = document.querySelector<HTMLButtonElement>('[data-action="save-location"]');
   const card = currentCard();
-  if (action && card) action.hidden = !canSaveLocation(card);
+  if (action && card) { action.hidden = !canSaveLocation(card); action.disabled = busy; }
+  const detailStatus = document.querySelector('#location-detail-status');
+  if (detailStatus) detailStatus.textContent = locationRequest ? t('locationChecking') : '';
   const grid = document.querySelector('#card-grid');
   if (grid) grid.innerHTML = listHtml();
 }
@@ -236,23 +237,33 @@ function shell(content: string): void {
 }
 function countLabel(count: number): string { return `${count} ${t(count === 1 ? 'card' : 'cards')}`; }
 function listHtml(): string {
-  const here = freshPosition();
-  const cards = nearbyFirst(sortCards(snapshot.cards, language, search), here);
+  const cards = sortCards(snapshot.cards, language, search);
   if (!cards.length) return `<section class="no-results"><h2>${escape(t('noResults'))}</h2><p>${escape(t('noResultsText'))}</p>${button('clear-search', escape(t('clearSearch')))}</section>`;
-  return cards.map((card) => `<a href="#card/${escape(card.id)}" data-route="card/${escape(card.id)}" class="membership-card" aria-label="${escape(t('openCard'))}: ${escape(card.name)}">
+  const nearby = nearbyCards(cards, freshPosition());
+  return `${nearby.length ? `<section id="nearby-cards" class="wallet-section" aria-labelledby="nearby-heading">
+      <h2 id="nearby-heading">${escape(t('nearbyCard'))}</h2>
+      <div class="card-grid">${nearby.map((card) => membershipCardHtml(card, true)).join('')}</div>
+    </section>` : ''}
+    <section id="all-cards" class="wallet-section" aria-labelledby="all-cards-heading">
+      <h2 id="all-cards-heading">${escape(t('allCards'))}</h2>
+      <div class="card-grid">${cards.map((card) => membershipCardHtml(card)).join('')}</div>
+    </section>`;
+}
+function membershipCardHtml(card: Card, nearby = false): string {
+  return `<a href="#card/${escape(card.id)}" data-route="card/${escape(card.id)}" class="membership-card" aria-label="${escape(t('openCard'))}: ${escape(card.name)}">
       <div class="card-art" style="--color-one:${card.colors[0]};--color-two:${card.colors[1]}">
         <span class="card-emblem">${icon('bag')}</span><span class="card-category">${escape(card.category || t('card'))}</span>
         <span class="card-monogram" aria-hidden="true">${escape(Array.from(card.name)[0] ?? '')}</span>
       </div>
-      <div class="card-caption"><div><h2>${escape(card.name)}</h2>${here && hasNearbyLocation(card, here) ? `<span class="nearby-badge">${icon('pin')}${escape(t('nearbyCard'))}</span>` : ''}<p class="mono">•••• ${escape(card.number.slice(-4))}</p></div><span class="card-open" aria-hidden="true">↗</span></div>
-    </a>`).join('');
+      <div class="card-caption"><div><h3>${escape(card.name)}</h3>${nearby ? `<span class="nearby-badge">${icon('pin')}${escape(t('nearbyCard'))}</span>` : ''}<p class="mono">•••• ${escape(card.number.slice(-4))}</p></div><span class="card-open" aria-hidden="true">↗</span></div>
+    </a>`;
 }
 function renderList(): void {
   shell(`<section class="page-heading"><div><p class="eyebrow">${escape(t('localNote'))}</p><h1 tabindex="-1">${escape(t('yourCards'))}<span class="count">${snapshot.cards.length}</span></h1></div>
     ${button('new', `${icon('plus')}${escape(t('addCard'))}`, 'button primary desktop-add')}</section>
     <section id="nearby-controls" aria-label="${escape(t('nearbyTitle'))}">${nearbyControlsHtml()}</section>
     ${snapshot.cards.length ? `<label class="search-box">${icon('search')}<input id="search" type="search" maxlength="100" placeholder="${escape(t('search'))}" aria-label="${escape(t('search'))}" value="${escape(search)}" autocomplete="off"></label>
-      <div id="card-grid" class="card-grid">${listHtml()}</div>` : `<section class="empty-state">
+      <div id="card-grid">${listHtml()}</div>` : `<section class="empty-state">
       <img src="${import.meta.env.BASE_URL}branding/cards.webp" width="300" height="300" alt="" fetchpriority="low">
       <p class="eyebrow">${escape(t('tagline'))}</p><h2>${escape(t('emptyTitle')).replace('\n', '<br>')}</h2><p>${escape(t('emptyText'))}</p>
       ${button('new', `${icon('plus')}${escape(t('addCard'))}`, 'button primary')}
@@ -265,11 +276,10 @@ function backLink(): string {
 function field(name: string, label: MessageKey, value: string, options = ''): string {
   return `<label class="field"><span>${escape(t(label))}</span><input name="${name}" value="${escape(value)}" ${options}></label>`;
 }
-function locationRow(location = { label: '', latitude: '', longitude: '' }): string {
-  return `<fieldset class="location-row"><legend class="sr-only">${escape(t('locations'))}</legend>
+function locationRow(location: Card['locations'][number], index: number): string {
+  return `<fieldset class="location-row" data-location-index="${index}"><legend class="sr-only">${escape(t('locations'))}</legend>
     ${field('location-label', 'locationLabel', String(location.label), 'maxlength="150"')}
-    <div class="field-pair">${field('latitude', 'latitude', String(location.latitude), 'type="number" step="any" min="-90" max="90" required inputmode="decimal"')}
-    ${field('longitude', 'longitude', String(location.longitude), 'type="number" step="any" min="-180" max="180" required inputmode="decimal"')}</div>
+    <p class="mono">${escape(location.latitude)}, ${escape(location.longitude)}</p>
     ${button('remove-location', escape(t('removeLocation')), 'text-button danger')}</fieldset>`;
 }
 function renderEditor(card?: Card): void {
@@ -298,8 +308,7 @@ function renderEditor(card?: Card): void {
         </div>
       </section>
       <section class="panel"><h2>${escape(t('locations'))}</h2><p class="muted">${escape(t('locationHelp'))}</p>
-        <div id="locations">${card?.locations.map((item) => locationRow({ label: item.label, latitude: String(item.latitude), longitude: String(item.longitude) })).join('') ?? ''}</div>
-        ${button('add-location', `${icon('plus')}${escape(t('addLocation'))}`)}
+        <div id="locations">${card?.locations.map(locationRow).join('') ?? ''}</div>
       </section>
       <div class="form-actions"><button type="submit" class="button primary">${escape(t('save'))}</button>${button('cancel', escape(t('cancel')))}</div>
     </form>`);
@@ -311,7 +320,8 @@ function renderDetail(card: Card): void {
   shell(`${backLink()}
     <section class="detail-title"><span class="detail-emblem" style="--color-one:${card.colors[0]};--color-two:${card.colors[1]}">${icon('bag')}</span>
       <p class="eyebrow">${escape(card.category || t('card'))}</p><h1 tabindex="-1">${escape(card.name)}</h1>
-      <span id="save-location">${saveLocationHtml(card)}</span></section>
+      <span id="save-location">${saveLocationHtml(card)}</span>
+      <p id="location-detail-status" class="hint" aria-live="polite">${locationRequest ? escape(t('locationChecking')) : ''}</p></section>
     <section class="scan-panel ${card.barcode?.format === 'qrcode' ? 'qr' : ''}" aria-label="${escape(t('barcode'))}">
       <p class="eyebrow">${escape(t('showToScan'))}</p>
       ${barcode ? `<div class="barcode-image" role="img" aria-label="${escape(t('barcode'))}: ${escape(card.barcode?.value ?? '')}">${barcode}</div><p class="barcode-value mono">${escape(card.barcode?.value ?? '')}</p>` : ''}
@@ -364,8 +374,9 @@ function readForm(form: HTMLFormElement): Card {
     addedAt: existing?.addedAt ?? new Date().toISOString(),
     colors: [value('color-one'), value('color-two')],
     locations: Array.from(form.querySelectorAll('.location-row')).map((row) => {
-      const input = (name: string) => row.querySelector<HTMLInputElement>(`[name="${name}"]`)?.value ?? '';
-      return { label: input('location-label'), latitude: Number(input('latitude')), longitude: Number(input('longitude')) };
+      const location = existing?.locations[Number(row.getAttribute('data-location-index'))];
+      if (!location) throw new WalletError('invalidCard');
+      return { ...location, label: row.querySelector<HTMLInputElement>('[name="location-label"]')?.value ?? '' };
     }),
     barcode: format ? { format, value: barcodeValue } : null,
   });
@@ -473,11 +484,10 @@ app.addEventListener('click', (event) => {
   if (action === 'save-location') void run(async () => {
     const card = currentCard();
     if (!card) throw new WalletError('conflict');
+    if (!canSaveLocation(card)) { showNotice(card.locations.length ? 'locationAlreadySaved' : 'locationDenied', true); return; }
     await refreshLocation(true);
     const here = freshPosition();
     if (!here) { showNotice(locationMessage, true); return; }
-    if (hasNearbyLocation(card, here)) { showNotice('locationAlreadySaved'); updateNearbyUi(); return; }
-    if (card.locations.length >= 50) { showNotice('limitLocations', true); return; }
     const updated = { ...card, locations: [...card.locations, { label: '', latitude: here.latitude, longitude: here.longitude }] };
     await commit(snapshot.cards.map((item) => item.id === card.id ? updated : item));
     showNotice('locationSaved');
@@ -485,11 +495,6 @@ app.addEventListener('click', (event) => {
   });
   if (action === 'dismiss') { notice = null; document.querySelector('#notices')?.replaceChildren(); }
   if (action === 'clear-search') { search = ''; renderList(); document.querySelector<HTMLInputElement>('#search')?.focus(); }
-  if (action === 'add-location') {
-    const locations = document.querySelector('#locations');
-    if (locations && locations.children.length < 50) { locations.insertAdjacentHTML('beforeend', locationRow()); dirty = true; locations.lastElementChild?.querySelector('input')?.focus(); }
-    else showNotice('limitLocations', true);
-  }
   if (action === 'remove-location') { target.closest('.location-row')?.remove(); dirty = true; }
   if (action === 'delete' && confirm(t('deleteConfirm'))) void run(async () => {
     const card = currentCard();

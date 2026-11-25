@@ -81,31 +81,71 @@ test('location is opt-in and a card can save its current area once', async ({ pa
   await expect(save).toHaveCount(0);
   await page.getByRole('button', { name: 'Edit', exact: true }).click();
   await expect(page.locator('.location-row')).toHaveCount(1);
-  await expect(page.getByRole('spinbutton', { name: 'Latitude', exact: true })).toHaveValue('52.52');
-  await expect(page.getByRole('spinbutton', { name: 'Longitude', exact: true })).toHaveValue('13.405');
+  await expect(page.locator('.location-row .mono')).toHaveText('52.52, 13.405');
+  await expect(page.getByRole('spinbutton')).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Location label', exact: true }).fill('Main branch');
+  await page.getByRole('button', { name: 'Save card', exact: true }).click();
+  await expect(page.getByText('Main branch', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'Remove location', exact: true }).click();
+  await page.getByRole('button', { name: 'Save card', exact: true }).click();
+  await expect(save).toBeVisible();
 });
 
-test('all nearby cards appear first across offline app opens while search and fallback stay alphabetical', async ({ page, context }) => {
+test('a separate nearby section appears above the complete alphabetical list, including offline', async ({ page, context }) => {
   await mockLocation(page, 'granted');
   page.on('dialog', (dialog) => dialog.accept());
   await restoreCards(page, [locatedCard('Alpha'), locatedCard('Zoo', 52.52), locatedCard('Market', 52.5205)]);
   await page.getByRole('link', { name: 'My wallet', exact: true }).click();
-  await expect(page.locator('.membership-card h2')).toHaveText(['Market', 'Zoo', 'Alpha']);
+  const nearby = page.getByRole('region', { name: 'Nearby', exact: true });
+  const all = page.getByRole('region', { name: 'All cards', exact: true });
+  await expect(nearby.locator('.membership-card h3')).toHaveText(['Market', 'Zoo']);
+  await expect(all.locator('.membership-card h3')).toHaveText(['Alpha', 'Market', 'Zoo']);
+  await expect(page.locator('.wallet-section > h2')).toHaveText(['Nearby', 'All cards']);
   await expect(page.locator('.nearby-badge')).toHaveCount(2);
+  await nearby.getByRole('link', { name: 'Open card: Zoo', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Zoo', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Back to wallet', exact: true }).click();
+  await page.getByRole('searchbox').fill('Market');
+  await expect(nearby.locator('.membership-card h3')).toHaveText(['Market']);
+  await expect(all.locator('.membership-card h3')).toHaveText(['Market']);
   await page.getByRole('searchbox').fill('Alpha');
-  await expect(page.locator('.membership-card h2')).toHaveText(['Alpha']);
+  await expect(nearby).toHaveCount(0);
+  await expect(all.locator('.membership-card h3')).toHaveText(['Alpha']);
+  await page.getByRole('searchbox').fill('Missing');
+  await expect(nearby).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'No matching cards', exact: true })).toBeVisible();
   await page.getByRole('searchbox').fill('');
   await page.evaluate(async () => { await navigator.serviceWorker.ready; });
   await page.reload();
   await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
   await context.setOffline(true);
   await page.reload();
-  await expect(page.locator('.membership-card h2')).toHaveText(['Market', 'Zoo', 'Alpha']);
+  await expect(nearby.locator('.membership-card h3')).toHaveText(['Market', 'Zoo']);
+  await expect(all.locator('.membership-card h3')).toHaveText(['Alpha', 'Market', 'Zoo']);
   await page.evaluate(() => { document.documentElement.dataset.locationError = '2'; });
   await page.getByRole('button', { name: 'Refresh nearby cards', exact: true }).click();
   await expect(page.getByText('Your location is unavailable. Cards remain in alphabetical order; try again when location is available.', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('.membership-card h2')).toHaveText(['Alpha', 'Market', 'Zoo']);
+  await expect(nearby).toHaveCount(0);
+  await expect(all.locator('.membership-card h3')).toHaveText(['Alpha', 'Market', 'Zoo']);
   await expect(page.locator('.nearby-badge')).toHaveCount(0);
+});
+
+test('German nearby section fits a narrow screen and disappears when all saved places are far away', async ({ page }) => {
+  await mockLocation(page, 'granted');
+  page.on('dialog', (dialog) => dialog.accept());
+  await restoreCards(page, [locatedCard('Alpha'), locatedCard('Zoo', 52.52)]);
+  await page.locator('#language').selectOption('de');
+  await expect(page.getByRole('heading', { name: 'Einstellungen', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Meine Wallet', exact: true }).click();
+  await page.setViewportSize({ width: 320, height: 740 });
+  await expect(page.locator('.wallet-section > h2')).toHaveText(['In der Nähe', 'Alle Karten']);
+  await expect(page.getByRole('region', { name: 'In der Nähe', exact: true }).locator('.membership-card')).toHaveCount(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.evaluate(() => { document.documentElement.dataset.latitude = '50'; });
+  await page.getByRole('button', { name: 'Karten in der Nähe aktualisieren', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'In der Nähe', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Alle Karten', exact: true }).locator('.membership-card h3')).toHaveText(['Alpha', 'Zoo']);
 });
 
 for (const accept of [true, false]) {
@@ -141,7 +181,8 @@ test('turning off nearby cards is remembered even when browser location permissi
   await page.reload();
   await expect(page.locator('#location-state')).toHaveText('Location disabled in this app');
   await page.getByRole('link', { name: 'My wallet', exact: true }).click();
-  await expect(page.locator('.membership-card h2')).toHaveText(['Alpha', 'Zoo']);
+  await expect(page.getByRole('region', { name: 'Nearby', exact: true })).toHaveCount(0);
+  await expect(page.locator('#all-cards .membership-card h3')).toHaveText(['Alpha', 'Zoo']);
   await expect(page.locator('html')).toHaveAttribute('data-location-requests', '0');
   await page.getByRole('link', { name: 'Open card: Alpha' }).click();
   await expect(page.getByRole('button', { name: 'Save current location for this card' })).toHaveCount(0);
@@ -159,12 +200,63 @@ test('settings explain browser denial and allow retry after browser location acc
   await expect(page.locator('#location-state')).toHaveText('Location enabled');
 });
 
-test('approximate location does not expose the save-location action', async ({ page }) => {
+test('location capture remains available with an approximate fix and saves only after accuracy improves', async ({ page }) => {
   await mockLocation(page, 'granted', 201);
   await page.goto('./');
-  await expect(page.getByText('Your position is too approximate for a 200-metre match. Try again with more precise location access.', { exact: true })).toBeVisible({ timeout: 20_000 });
   await addCard(page);
+  const save = page.getByRole('button', { name: 'Save current location for this card' });
+  await expect(save).toBeVisible();
+  await save.click();
+  await expect(save).toBeDisabled();
+  await expect(page.locator('#location-detail-status')).toContainText('Checking your location');
+  await page.evaluate(() => { document.documentElement.dataset.locationAccuracy = '25'; });
+  await expect(page.getByText('Location saved. This card will be suggested when you are nearby.', { exact: true })).toBeVisible();
+  await expect(save).toHaveCount(0);
+});
+
+test('an existing location suppresses capture even when it is far away and coordinates are not manually editable', async ({ page }) => {
+  await mockLocation(page, 'granted');
+  page.on('dialog', (dialog) => dialog.accept());
+  const card = locatedCard('Far', 50);
+  card.locations.push({ label: 'Second branch', latitude: 49, longitude: 12 });
+  await restoreCards(page, [card]);
+  await page.getByRole('link', { name: 'My wallet', exact: true }).click();
+  await page.getByRole('link', { name: 'Open card: Far', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Save current location for this card' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(page.getByRole('spinbutton')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add location', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Remove location', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Save card', exact: true }).click();
+  await expect(page.locator('.location-list')).toContainText('Second branch');
+  await expect(page.locator('.location-list')).toContainText('49, 12');
+  await page.reload();
+  await expect(page.locator('.location-list li')).toHaveCount(1);
+});
+
+test('German card-detail capture stays visible after lookup failure and fits a narrow screen', async ({ page }) => {
+  await mockLocation(page, 'granted');
+  await page.goto('./');
+  await addCard(page);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.locator('#language').selectOption('de');
+  await expect(page.getByRole('heading', { name: 'Einstellungen', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Meine Wallet', exact: true }).click();
+  await page.locator('.membership-card').click();
+  await page.setViewportSize({ width: 320, height: 740 });
+  const capture = page.getByRole('button', { name: 'Aktuellen Standort hinzufügen', exact: true });
+  await expect(capture).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
+      watchPosition() { throw new Error('Location hardware unavailable'); },
+      clearWatch() {},
+    } });
+  });
+  await capture.click();
+  await expect(page.getByRole('alert')).toContainText('Dein Standort ist nicht verfügbar');
+  await expect(capture).toBeEnabled();
+  await expect(page.locator('.location-list')).toHaveCount(0);
 });
 
 test('a coarse initial phone location can improve before the 15-second deadline', async ({ page }) => {
@@ -208,15 +300,12 @@ test('mobile create, edit, search, reload, and delete preserve card details', as
   await page.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.getByRole('textbox', { name: 'Card name', exact: true }).fill('Library Rewards');
   await page.getByRole('textbox', { name: 'Membership number', exact: true }).fill('00042');
-  await page.getByRole('button', { name: 'Add location', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Location label', exact: true }).fill('Main branch');
-  await page.getByRole('spinbutton', { name: 'Latitude', exact: true }).fill('52.52');
-  await page.getByRole('spinbutton', { name: 'Longitude', exact: true }).fill('13.405');
+  await expect(page.getByRole('button', { name: 'Add location', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('spinbutton')).toHaveCount(0);
   await page.getByRole('button', { name: 'Save card', exact: true }).click();
   await expect(page.locator('.barcode-value')).toHaveText('00042');
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Library Rewards', exact: true })).toBeVisible();
-  await expect(page.getByText('Main branch', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Back to wallet', exact: true }).click();
   await page.getByRole('searchbox').fill('missing');
   await expect(page.getByRole('heading', { name: 'No matching cards' })).toBeVisible();

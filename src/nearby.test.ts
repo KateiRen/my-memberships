@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { distanceMetres, hasNearbyLocation, nearbyFirst, requestPosition, POSITION_WAIT_MS } from './nearby';
+import { distanceMetres, hasNearbyLocation, nearbyCards, requestPosition, POSITION_WAIT_MS } from './nearby';
 import { sortCards, type Card } from './model';
 
 const here = { latitude: 0, longitude: 0 };
@@ -20,14 +20,16 @@ test('uses the same 200-metre boundary for nearby suggestions and already-saved 
   expect(distanceMetres({ latitude: 0, longitude: 179.9995 }, { latitude: 0, longitude: -179.9995 })).toBeLessThan(200);
 });
 
-test('promotes all matching cards while retaining alphabetical search results without changing stored order', () => {
+test('selects all nearby cards in alphabetical search order without changing the full list', () => {
   const cards = [
     card('Zoo', [{ label: '', ...here }]), card('Alpha'),
     card('Market', [{ label: '', ...north(100) }]), card('Far away', [{ label: '', ...north(201) }]),
   ];
-  expect(nearbyFirst(sortCards(cards, 'en'), here).map((item) => item.name)).toEqual(['Market', 'Zoo', 'Alpha', 'Far away']);
-  expect(nearbyFirst(sortCards(cards, 'en', 'alpha'), here).map((item) => item.name)).toEqual(['Alpha']);
-  expect(nearbyFirst(sortCards(cards, 'en'), null).map((item) => item.name)).toEqual(['Alpha', 'Far away', 'Market', 'Zoo']);
+  const sorted = sortCards(cards, 'en');
+  expect(nearbyCards(sorted, here).map((item) => item.name)).toEqual(['Market', 'Zoo']);
+  expect(nearbyCards(sortCards(cards, 'en', 'alpha'), here)).toEqual([]);
+  expect(nearbyCards(sorted, null)).toEqual([]);
+  expect(sorted.map((item) => item.name)).toEqual(['Alpha', 'Far away', 'Market', 'Zoo']);
   expect(cards.map((item) => item.name)).toEqual(['Zoo', 'Alpha', 'Market', 'Far away']);
 });
 

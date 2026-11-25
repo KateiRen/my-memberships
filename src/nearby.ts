@@ -21,12 +21,8 @@ export function distanceMetres(a: Point, b: Point): number {
 export function hasNearbyLocation(card: Pick<Card, 'locations'>, position: Point): boolean {
   return card.locations.some((location) => distanceMetres(location, position) <= NEARBY_METRES);
 }
-export function nearbyFirst(cards: Card[], position: Point | null): Card[] {
-  if (!position) return cards;
-  const nearby: Card[] = [];
-  const other: Card[] = [];
-  for (const card of cards) (hasNearbyLocation(card, position) ? nearby : other).push(card);
-  return [...nearby, ...other];
+export function nearbyCards(cards: Card[], position: Point | null): Card[] {
+  return position ? cards.filter((card) => hasNearbyLocation(card, position)) : [];
 }
 export function requestPosition(): Promise<CurrentPosition> {
   return new Promise((resolve, reject) => {
