@@ -9,30 +9,36 @@ async function mockLocation(page: Page, permission: PermissionState = 'prompt', 
       query: async () => status,
     } });
     Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
-      getCurrentPosition: (success: PositionCallback, error: (error: { code: number }) => void) => queueMicrotask(() => {
+      watchPosition: (success: PositionCallback, error: (error: { code: number }) => void) => {
         const element = document.documentElement;
         element.dataset.locationRequests = String(Number(element.dataset.locationRequests ?? 0) + 1);
-        const code = Number(element.dataset.locationError ?? failure);
-        if (code) {
-          if (code === 1) {
-            status.state = 'denied';
-            sessionStorage.setItem('test-location-permission', 'denied');
-            status.dispatchEvent(new Event('change'));
+        const emit = () => {
+          const code = Number(element.dataset.locationError ?? failure);
+          if (code) {
+            if (code === 1) {
+              status.state = 'denied';
+              sessionStorage.setItem('test-location-permission', 'denied');
+              status.dispatchEvent(new Event('change'));
+            }
+            error({ code });
+            return;
           }
-          error({ code });
-          return;
-        }
-        status.state = 'granted';
-        sessionStorage.setItem('test-location-permission', 'granted');
-        status.dispatchEvent(new Event('change'));
-        success({
-          coords: {
-            latitude: Number(element.dataset.latitude ?? 52.52), longitude: 13.405, accuracy,
-            altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}),
-          },
-          timestamp: Date.now(), toJSON: () => ({}),
-        });
-      }),
+          status.state = 'granted';
+          sessionStorage.setItem('test-location-permission', 'granted');
+          status.dispatchEvent(new Event('change'));
+          success({
+            coords: {
+              latitude: Number(element.dataset.latitude ?? 52.52), longitude: 13.405, accuracy: Number(element.dataset.locationAccuracy ?? accuracy),
+              altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}),
+            },
+            timestamp: Date.now(), toJSON: () => ({}),
+          });
+        };
+        const watch = setInterval(emit, 250);
+        queueMicrotask(emit);
+        return watch;
+      },
+      clearWatch: (watch: number) => clearInterval(watch),
     } });
   }, { permission, accuracy, failure });
 }
@@ -97,7 +103,7 @@ test('all nearby cards appear first across offline app opens while search and fa
   await expect(page.locator('.membership-card h2')).toHaveText(['Market', 'Zoo', 'Alpha']);
   await page.evaluate(() => { document.documentElement.dataset.locationError = '2'; });
   await page.getByRole('button', { name: 'Refresh nearby cards', exact: true }).click();
-  await expect(page.getByText('Your location is unavailable. Cards remain in alphabetical order; try again when location is available.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Your location is unavailable. Cards remain in alphabetical order; try again when location is available.', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.membership-card h2')).toHaveText(['Alpha', 'Market', 'Zoo']);
   await expect(page.locator('.nearby-badge')).toHaveCount(0);
 });
@@ -156,9 +162,19 @@ test('settings explain browser denial and allow retry after browser location acc
 test('approximate location does not expose the save-location action', async ({ page }) => {
   await mockLocation(page, 'granted', 201);
   await page.goto('./');
-  await expect(page.getByText('Your position is too approximate for a 200-metre match. Try again with more precise location access.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Your position is too approximate for a 200-metre match. Try again with more precise location access.', { exact: true })).toBeVisible({ timeout: 20_000 });
   await addCard(page);
   await expect(page.getByRole('button', { name: 'Save current location for this card' })).toHaveCount(0);
+});
+
+test('a coarse initial phone location can improve before the 15-second deadline', async ({ page }) => {
+  await mockLocation(page, 'granted', 1500);
+  await page.goto('./');
+  await expect(page.getByText('Checking your location. You can keep using your wallet.', { exact: true })).toBeVisible();
+  await page.evaluate(() => { document.documentElement.dataset.locationAccuracy = '25'; });
+  await expect(page.getByText('Cards with a saved location within 200 metres appear first.', { exact: true })).toBeVisible();
+  await addCard(page);
+  await expect(page.getByRole('button', { name: 'Save current location for this card' })).toBeVisible();
 });
 
 test('denying the native permission request is remembered and can be retried from settings', async ({ page }) => {
