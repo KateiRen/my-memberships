@@ -64,8 +64,8 @@ describe('barcodes', () => {
   it.each([
     ['code128', ' 00  1234 '], ['code39', ' 00  AB12 '], ['ean13', '4006 3813 3393 1'], ['ean8', '9638 5074'], ['qrcode', ' 00\u00a012 34 '], ['azteccode', ' 00\u00a012 34 '],
   ] as const)('preserves membership spacing but encodes %s without whitespace, including restored cards', (format, number) => {
-    const card = validateCard(exampleCard({ number, barcode: { format, value: number } }));
     const compact = number.replace(/\s/g, '');
+    const card = validateCard(exampleCard({ number, barcode: { format, value: compact } }));
     expect(card.number).toBe(number);
     expect(card.barcode).toEqual({ format, value: compact });
     expect(barcodeSvg(card.barcode!)).toBe(barcodeSvg({ format, value: compact }));
@@ -75,6 +75,13 @@ describe('barcodes', () => {
     const card = validateCard(exampleCard({ number: '00 1234', barcode: { format, value: 'custom value with spaces' } }));
     expect(card.barcode?.value).toBe('custom value with spaces');
     expect(parseBackup(backupJson([card]))).toEqual([card]);
+  });
+  it.each(['code128', 'qrcode', 'azteccode'] as const)('preserves a scanned %s payload even when it equals the membership number', (format) => {
+    const value = format === 'code128' ? ' 00  1234 ' : ' 00\r\n12 \u00a0é ';
+    const card = validateCard(exampleCard({ number: value, barcode: { format, value } }));
+    expect(card.barcode?.value).toBe(value);
+    expect(parseBackup(backupJson([card]))[0]?.barcode?.value).toBe(value);
+    expect(barcodeSvg(card.barcode!)).toBe(barcodeSvg({ format, value }));
   });
   it.each([
     ['code128', '001234'], ['code39', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -.$/+%'],

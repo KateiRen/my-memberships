@@ -1,5 +1,126 @@
 import { expect, test, type Page } from '@playwright/test';
-import type { Card } from '../src/model';
+import { barcodeSvg, parseBackup, type Card, type BarcodeFormat } from '../src/model';
+import { readFile } from 'node:fs/promises';
+import sharp from 'sharp';
+
+async function mockCamera(page: Page, format?: BarcodeFormat, value = ''): Promise<void> {
+  const png = format ? await sharp(Buffer.from(barcodeSvg({ format, value }))).png().toBuffer()
+    : await sharp({ create: { width: 640, height: 480, channels: 4, background: '#ffffff' } }).png().toBuffer();
+  await page.addInitScript((url) => {
+    const image = new Image();
+    image.src = url;
+    let activeStream: unknown = null;
+    Object.defineProperty(HTMLMediaElement.prototype, 'srcObject', {
+      configurable: true, get: () => activeStream, set: (stream: unknown) => { activeStream = stream; },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, 'play', { configurable: true, value: async () => {} });
+    Object.defineProperty(HTMLVideoElement.prototype, 'videoWidth', { configurable: true, get: () => image.naturalWidth });
+    Object.defineProperty(HTMLVideoElement.prototype, 'videoHeight', { configurable: true, get: () => image.naturalHeight });
+    Object.defineProperty(HTMLVideoElement.prototype, 'readyState', { configurable: true, get: () => 4 });
+    const draw: (this: CanvasRenderingContext2D, source: CanvasImageSource, x: number, y: number, width: number, height: number) => void = CanvasRenderingContext2D.prototype.drawImage;
+    Object.defineProperty(CanvasRenderingContext2D.prototype, 'drawImage', { configurable: true,
+      value: function (this: CanvasRenderingContext2D, source: CanvasImageSource, x: number, y: number, width: number, height: number) {
+        draw.call(this, source instanceof HTMLVideoElement ? image : source, x, y, width, height);
+      },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+      getUserMedia: async () => {
+        document.documentElement.dataset.cameraRequests = String(Number(document.documentElement.dataset.cameraRequests ?? 0) + 1);
+        await image.decode();
+        const track = Object.assign(new EventTarget(), {
+          stop: () => { document.documentElement.dataset.cameraStopped = 'true'; },
+        });
+        return { getTracks: () => [track], getVideoTracks: () => [track] };
+      },
+    } });
+  }, `data:image/png;base64,${png.toString('base64')}`);
+}
+
+for (const [format, value] of [
+  ['qrcode', '00042'], ['qrcode', ' https://example.test/card\r\nMüller & Sons '],
+  ['qrcode', 'x'.repeat(201)], ['azteccode', ' 00 1234 é '], ['code128', ' 000123456789 '],
+  ['code39', 'AB-00042'], ['ean13', '4006381333931'], ['ean8', '96385074'],
+] satisfies [BarcodeFormat, string][]) {
+  test(`camera captures ${format} (${value.length} characters) and preserves its reviewed payload`, async ({ page }) => {
+    await mockCamera(page, format, value);
+    await page.goto('./#new');
+    await expect(page.locator('#scan-status')).toContainText('Code captured');
+    await expect(page.locator('#barcode-format')).toHaveValue(format);
+    await expect(page.locator('[name="barcode-value"]')).toHaveValue(value.replace(/\r\n?/g, '\n'));
+    await expect(page.locator('#same-number')).not.toBeChecked();
+    await expect(page.locator('html')).toHaveAttribute('data-camera-stopped', 'true');
+    await page.getByRole('textbox', { name: 'Card name', exact: true }).fill('Target');
+    await expect(page.locator('[name="color-one"]')).toHaveValue('#cc0000');
+    await page.getByRole('textbox', { name: 'Membership number', exact: true }).fill('00042');
+    await page.getByRole('button', { name: 'Save card', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Target', exact: true })).toBeVisible();
+    const svg = await page.locator('.barcode-image').innerHTML();
+    await page.reload();
+    expect(await page.locator('.barcode-value').textContent()).toBe(value.replace(/\r\n?/g, '\n'));
+    expect(await page.locator('.barcode-image').innerHTML()).toBe(svg);
+    const expectedSvg = await page.evaluate((markup) => {
+      const container = document.createElement('div');
+      container.innerHTML = markup;
+      return container.innerHTML;
+    }, barcodeSvg({ format, value }));
+    expect(svg).toBe(expectedSvg);
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.locator('#barcode-format')).toHaveValue(format);
+    await page.getByRole('button', { name: 'Save card', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Target', exact: true })).toBeVisible();
+    expect(await page.locator('.barcode-value').textContent()).toBe(value.replace(/\r\n?/g, '\n'));
+    await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download backup', exact: true }).click();
+    const path = await (await download).path();
+    if (!path) throw new Error('Backup not downloaded');
+    expect(parseBackup(await readFile(path, 'utf8'))[0]?.barcode).toEqual({ format, value });
+    await page.locator('#restore-file').setInputFiles(path);
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: 'Replace wallet', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Replace wallet', exact: true })).toHaveCount(0);
+    await page.getByRole('link', { name: 'My wallet', exact: true }).click();
+    await page.getByRole('link', { name: 'Open card: Target', exact: true }).click();
+    expect(await page.locator('.barcode-value').textContent()).toBe(value.replace(/\r\n?/g, '\n'));
+    expect(await page.locator('.barcode-image').innerHTML()).toBe(svg);
+  });
+}
+
+test('camera permission denial leaves manual entry available', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+      getUserMedia: async () => { throw new DOMException('Denied', 'NotAllowedError'); },
+    } });
+  });
+  await page.goto('./#new');
+  await expect(page.locator('#camera-panel [role="alert"]')).toContainText('Camera access denied');
+  await page.getByRole('button', { name: 'Enter manually', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Card name', exact: true })).toBeFocused();
+  await page.getByRole('textbox', { name: 'Card name', exact: true }).fill('Manual card');
+  await page.getByRole('textbox', { name: 'Membership number', exact: true }).fill('0001');
+  await page.getByRole('button', { name: 'Save card', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Manual card', exact: true })).toBeVisible();
+});
+
+test('camera capture stops on manual entry or navigation and can restart offline', async ({ page, context }) => {
+  await mockCamera(page);
+  await page.goto('./');
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'Add a card', exact: true }).last().click();
+  await expect(page.locator('#scan-status')).toContainText('Looking for a code');
+  await expect(page.locator('html')).toHaveAttribute('data-camera-requests', '1');
+  await page.getByRole('button', { name: 'Enter manually', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-camera-stopped', 'true');
+  await page.getByRole('button', { name: 'Scan with camera', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-camera-requests', '2');
+  await page.evaluate(() => { delete document.documentElement.dataset.cameraStopped; });
+  await page.getByRole('link', { name: 'Back to wallet', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-camera-stopped', 'true');
+  await expect(page.locator('#camera-panel')).toHaveCount(0);
+});
 
 async function mockLocation(page: Page, permission: PermissionState = 'prompt', accuracy = 10, failure = 0): Promise<void> {
   await page.addInitScript(({ permission, accuracy, failure }) => {

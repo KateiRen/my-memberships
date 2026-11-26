@@ -42,9 +42,17 @@ The asset script generates optimized artwork and PWA icons from the original bra
 
 The MVP includes manual card creation, editing and deletion, name search, alphabetical ordering, barcode display, offline use, and JSON backup/restore. The interface supports English and German from the start. Categories are optional user-entered values with suggestions from existing categories. Locations are captured from the device when viewing a saved card, not entered manually; map and address search come later.
 
-Camera scanning, other-wallet imports, nearby-business lookup, and cloud sync are outside the MVP.
+Other-wallet imports, nearby-business lookup, and cloud sync are outside the MVP.
 
 Opening a card shows its name immediately followed by the barcode or QR code, without a category emblem or caption. The optional save-location action appears inside the scan panel directly below the code and its number, before the scan hint.
+
+## Adding a card with the camera
+
+Adding a new card opens the rear camera and looks for QR, Aztec, Code 128, Code 39, EAN-13, or EAN-8 codes. Camera access and decoding stay on the device; frames and decoded values are not uploaded. The local decoder also works offline after the app is ready for offline use. Camera-specific code and translations are loaded only for new-card scanning, not when opening the wallet or an existing card.
+
+After detection, capture stops and the editor shows the exact decoded payload and detected format. Add the card name, review the fields, and save explicitly; scanning never saves a card by itself. Text up to 200 characters also fills the membership-number field. Longer QR text needs a separate membership number. The custom barcode field retains spaces, leading zeros, Unicode, and line breaks independently of the membership number. Saving, editing, backup, and restore preserve that payload. The regenerated code uses the detected symbology and content, not necessarily the original code's visual layout or error-correction settings. Existing format and size limits still apply; invalid values are rejected rather than converted to another format.
+
+**Enter manually** stops capture, and **Scan with camera** allows another attempt. Editing any card field also stops scanning to avoid overwriting changes. Leaving the editor or hiding the app releases the camera, including a stream received after cancellation. Permission denial, missing cameras, and decoding/startup errors are explained while manual entry remains available. Physical Android and iPhone checks are still required for camera hardware, focus, permissions, and real-world scanning.
 
 ## Restoring a backup
 
@@ -99,7 +107,7 @@ The asset step validates the reference data and generates a compact name-to-pale
 
 Each membership card stores:
 
-- Its name and membership number (preserving leading zeros and spaces exactly as entered). Barcodes and QR codes using the membership number omit whitespace from the encoded value, while the displayed number retains it. Separate custom code values are unchanged.
+- Its name and membership number (preserving leading zeros and spaces exactly as entered). Selecting **Use membership number as barcode value** omits whitespace from the encoded value, while the displayed number retains it. Scanned and custom code values are preserved exactly, even if they happen to equal the membership number.
 - A description and category.
 - The date it was added.
 - Two brand colors.
@@ -109,7 +117,7 @@ Cards will also support barcode display.
 
 ## Later features
 
-- Import cards by scanning with the camera, reading a Stocard backup, or reading supported exports from other wallets. Supported backup formats will need to be verified during implementation.
+- Import cards by reading a Stocard backup or supported exports from other wallets. Supported backup formats will need to be verified during implementation.
 - Look up nearby stores or businesses associated with cards already in the wallet. Matching against explicitly saved locations is already supported; external business discovery remains deferred.
 
 ## Where your cards will live

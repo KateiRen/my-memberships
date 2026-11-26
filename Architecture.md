@@ -14,7 +14,7 @@ The primary experience is using a phone at the store, either in a mobile browser
 ## Agreed MVP scope
 
 - Manual card creation, editing, and deletion; a card list with name search and alphabetical ordering; and a card detail view with barcode display.
-- IndexedDB persistence, an offline app shell, PWA installation where supported, and the app's own JSON backup/restore. Opt-in nearby ordering using saved locations is an implemented enhancement. Camera scanning, other-wallet imports, nearby-business discovery, and cloud sync remain later features.
+- IndexedDB persistence, an offline app shell, PWA installation where supported, and the app's own JSON backup/restore. Opt-in nearby ordering and local camera scanning are implemented enhancements. Other-wallet imports, nearby-business discovery, and cloud sync remain later features.
 - English and German interfaces from the first release. Keep UI strings translatable and use locale-aware sorting and date display; do not translate user-entered card data.
 - An optional user-entered category with suggestions from categories already in the wallet. Dedicated category management, favorites, and custom ordering are deferred.
 - Optional saved locations captured from the device when viewing a saved card with location enabled. No manual coordinate entry. Labels remain editable and saved locations can be removed. Map selection and address search are deferred; creating a card must not require a location or location permission.
@@ -57,11 +57,15 @@ Export a JSON snapshot with a format version and a cards array (suggested filena
 
 On restore, validate the version, size, and card fields before writing anything. Show a preview and ask before replacing an existing wallet; apply the replacement atomically so a failed import leaves the existing wallet intact. Treat imported values as data, not HTML. Tell users that exports are readable JSON containing their membership numbers and barcodes; do not log or send those values to analytics. Keep third-party scripts out of the core app and use a restrictive Content Security Policy.
 
-## Later: camera and other-wallet imports
+## Camera capture and later other-wallet imports
 
-Support adding cards by scanning a barcode with the camera, importing a Stocard backup, and importing supported exports from other wallets. These are separate from restoring the app's own JSON backup. Verify available export formats and compatibility before claiming support; do not assume every wallet exposes an importable backup.
+Adding a new card opens a rear-facing, video-only camera preview while retaining manual entry. A lazily loaded local ZXing decoder recognizes QR, Aztec, Code 128, Code 39, EAN-13, and EAN-8. Decode at most every 250 ms with frames scaled to a maximum dimension of 1,280 pixels. Validate that the payload can be rendered with the detected symbology before filling the editor; never infer the format from the decoded text. Stop capture on detection, manual entry, editing, route changes, or app hiding, and release streams that arrive after cancellation. Camera permission/startup errors and paused capture have localized status messages and manual fallback.
 
-Request camera access only when scanning and retain manual entry if permission is denied or scanning is unsupported. Decode supported barcodes on the device and let the user review or complete card details before saving. For file imports, map available source fields into the card model, preserve the original date added when provided, and record the import date otherwise. Preview imported cards and resolve duplicates with the user rather than silently replacing existing cards. Apply the same input validation and data-handling protections as backup restore.
+The scanned payload and format remain separate from the membership number. Do not strip payload whitespace in model validation or restore. Whitespace removal belongs only to the editor's explicitly selected "use membership number" option. A textarea supports multiline payloads; the editor retains the original CR/LF representation for unchanged scanned/stored values despite textarea newline normalization. Membership numbers remain limited to 200 characters; longer scanned payloads leave that required field for the user to fill. Saving still requires explicit review and a revision-checked wallet transaction. Backup/database schemas are unchanged.
+
+Camera-specific UI, translations, and decoder code are cached for offline use but dynamically imported only for scanning. Core shared dependencies must not be folded into the scanner chunk, which would force decoder loading at wallet startup. Browser-native module loading is used without generated preload scaffolding to meet the core asset budget.
+
+Importing Stocard backups and supported exports from other wallets remains deferred and separate from the app's own JSON backup restore. Verify available export formats and compatibility before claiming support. Map source fields into the card model, preserve the original date added when provided, and record the import date otherwise. Preview imports and resolve duplicates with the user rather than silently replacing existing cards.
 
 ## Saved-location suggestions
 
@@ -109,7 +113,7 @@ Track the last successfully synced snapshot and remote revision per connected ac
 
 Additional later milestones:
 
-- **Card imports:** implement camera scanning, Stocard backup import, and other-wallet adapters as supported formats are verified. Test camera denial, unsupported barcodes and formats, field mapping, duplicate handling, and malformed files without changing existing cards.
+- **Card imports:** camera scanning is implemented; Stocard backup import and other-wallet adapters remain deferred. Test camera denial, unsupported barcodes and formats, field mapping, duplicate handling, and malformed files without changing existing cards.
 - **Nearby businesses:** extend implemented saved-location matching with a separately approved nearby-business lookup. Test lookup failures, false business matches, and ordering when local and external suggestions overlap.
 
 ## MVP implementation choices
@@ -126,5 +130,5 @@ Additional later milestones:
 
 - Test current and previous major iOS Safari and Android Chrome releases on physical phones, including installed mode where offered. Desktop compatibility targets current Chrome, Firefox, Edge, and Safari. Automated Chromium/WebKit mobile emulation is not device or full-browser certification.
 - Verify that store scanners can read each supported barcode format from real phone displays, and test installation, safe areas, keyboard interaction, screen-reader use, text enlargement, backup downloads/file selection, storage denial/quota errors, and an update with an unsaved form and another tab open.
-- Initial asset budgets: combined JavaScript at most 100 KiB gzip, CSS at most 10 KiB gzip, and the static precache at most 1 MiB uncompressed. Measure cold wallet usability within 3 seconds on a representative mid-range phone over a constrained connection and saved-card opening within 200 ms; these device timing targets still need measurement.
+- Asset budgets: core JavaScript at most 100 KiB gzip, on-demand scanner JavaScript at most 50 KiB gzip, CSS at most 10 KiB gzip, and total static assets at most 1.25 MiB uncompressed. The dedicated scanner and larger offline-asset limits were approved for cross-browser camera capture. Measure cold wallet usability within 3 seconds on a representative mid-range phone over a constrained connection and saved-card opening within 200 ms; these device timing targets still need measurement.
 - Enable Pages with GitHub Actions, publish the first validated commit, and verify installation, asset paths, updates, and offline reloads at the actual production URL. No production deployment has been verified yet.

@@ -32,6 +32,7 @@ let nearbyEnabled: boolean | undefined;
 let nearbyInitialization: Promise<void> | undefined;
 let brands: Record<string, [string, string] | null> | undefined;
 let brandsLoading: Promise<void> | undefined;
+let stopCamera: (() => void) | undefined;
 const t = (key: MessageKey) => translate(language, key);
 const escape = (value: string | number) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
 const icon = (name: 'wallet' | 'plus' | 'search' | 'settings' | 'arrow' | 'bag' | 'shield' | 'pin') => {
@@ -229,6 +230,8 @@ async function initializeNearby(): Promise<void> {
   }
 }
 function shell(content: string): void {
+  stopCamera?.();
+  stopCamera = undefined;
   document.documentElement.lang = language;
   app.innerHTML = `
     <header class="masthead">
@@ -305,7 +308,8 @@ function renderEditor(card?: Card): void {
   const barcode = card?.barcode;
   const sameNumber = !barcode || barcode.value === membershipBarcodeValue(card?.number ?? '');
   shell(`${backLink()}<section class="page-heading"><div><p class="eyebrow">${escape(t('formIntro'))}</p><h1 tabindex="-1">${escape(t(card ? 'editCard' : 'newCard'))}</h1></div></section>
-    <form id="card-form" class="editor" autocomplete="off" ${card ? '' : 'data-brand-colors="#c5ed76,#275c4b"'}>
+    ${card ? '' : '<section id="camera-panel" class="panel"></section>'}
+    <form id="card-form" class="editor" autocomplete="off" data-barcode-value="${encodeURIComponent(barcode?.value ?? '')}" ${card ? '' : 'data-brand-colors="#c5ed76,#275c4b"'}>
       <p class="muted">${escape(t('requiredNote'))}</p>
       <section class="panel"><h2>${escape(t('cardDetails'))}</h2>
         ${field('name', 'name', card?.name ?? '', `required maxlength="100" placeholder="${escape(t('namePlaceholder'))}"`)}
@@ -322,7 +326,7 @@ function renderEditor(card?: Card): void {
         <label class="field"><span>${escape(t('barcodeFormat'))}</span><select name="barcode-format" id="barcode-format"><option value="">${escape(t('noBarcode'))}</option>${FORMATS.map((format) => `<option value="${format}" ${barcode?.format === format ? 'selected' : ''}>${({ code128: 'Code 128', code39: 'Code 39', ean13: 'EAN-13', ean8: 'EAN-8', qrcode: 'QR', azteccode: 'Aztec' })[format]}</option>`).join('')}</select></label>
         <div id="barcode-fields" ${barcode ? '' : 'hidden'}>
           <label class="checkbox"><input type="checkbox" id="same-number" ${sameNumber ? 'checked' : ''}>${escape(t('sameNumber'))}</label>
-          ${field('barcode-value', 'barcodeValue', barcode?.value ?? membershipBarcodeValue(card?.number ?? ''), `maxlength="1024" ${sameNumber ? 'readonly' : ''}`)}
+          <label class="field"><span>${escape(t('barcodeValue'))}</span><textarea name="barcode-value" rows="2" maxlength="1024" ${sameNumber ? 'readonly' : ''}>${escape(barcode?.value ?? membershipBarcodeValue(card?.number ?? ''))}</textarea></label>
           <p class="hint">${escape(t('eanHelp'))}</p>
         </div>
       </section>
@@ -331,7 +335,14 @@ function renderEditor(card?: Card): void {
       </section>
       <div class="form-actions"><button type="submit" class="button primary">${escape(t('save'))}</button>${button('cancel', escape(t('cancel')))}</div>
     </form>`);
-  if (!card) void loadBrands();
+  if (!card) {
+    void loadBrands();
+    const host = app.querySelector<HTMLElement>('#camera-panel')!;
+    const form = app.querySelector<HTMLFormElement>('#card-form')!;
+    void import('./camera').then(({ mountCamera }) => {
+      if (host.isConnected) stopCamera = mountCamera(host, form, language, t, () => { dirty = true; }, !dirty);
+    }).catch(() => showNotice('scanFailed', true));
+  }
 }
 function applyBrandColors(): void {
   const form = app.querySelector<HTMLFormElement>('#card-form[data-brand-colors]');
@@ -425,7 +436,10 @@ function readForm(form: HTMLFormElement): Card {
   const existing = currentCard();
   const format = value('barcode-format');
   const number = value('number');
-  const barcodeValue = form.querySelector<HTMLInputElement>('#same-number')?.checked ? membershipBarcodeValue(number) : value('barcode-value');
+  const original = decodeURIComponent(form.dataset.barcodeValue ?? '');
+  const entered = value('barcode-value');
+  const barcodeValue = form.querySelector<HTMLInputElement>('#same-number')?.checked ? membershipBarcodeValue(number)
+    : entered === original.replace(/\r\n?/g, '\n') ? original : entered;
   return validateCard({
     id: existing?.id ?? crypto.randomUUID(), name: value('name').trim(), number,
     description: value('description'), category: value('category').trim(),
@@ -492,7 +506,7 @@ app.addEventListener('input', (event) => {
     if (grid) grid.innerHTML = listHtml();
   }
   if (input.getAttribute('name') === 'number' && document.querySelector<HTMLInputElement>('#same-number')?.checked) {
-    const barcode = document.querySelector<HTMLInputElement>('[name="barcode-value"]');
+    const barcode = document.querySelector<HTMLTextAreaElement>('[name="barcode-value"]');
     if (barcode) barcode.value = membershipBarcodeValue(input.value);
   }
 });
@@ -509,7 +523,7 @@ app.addEventListener('change', (event) => {
     if (fields) fields.hidden = !input.value;
   }
   if (input.id === 'same-number' && input instanceof HTMLInputElement) {
-    const barcode = document.querySelector<HTMLInputElement>('[name="barcode-value"]');
+    const barcode = document.querySelector<HTMLTextAreaElement>('[name="barcode-value"]');
     if (barcode) {
       barcode.readOnly = input.checked;
       if (input.checked) barcode.value = membershipBarcodeValue(document.querySelector<HTMLInputElement>('[name="number"]')?.value ?? '');

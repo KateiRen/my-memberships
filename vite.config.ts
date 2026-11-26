@@ -34,8 +34,12 @@ export default defineConfig({
   ],
   build: {
     target: 'es2022',
+    modulePreload: false,
     rolldownOptions: {
-      output: { codeSplitting: { groups: [{ name: 'barcodes', test: /node_modules[/\\]bwip-js/ }] } },
+      output: { codeSplitting: { groups: [
+        { name: 'barcodes', test: /node_modules[/\\]bwip-js/ },
+        { name: 'decoder', test: /node_modules[/\\]@zxing[/\\]|[/\\]src[/\\](?:camera|scanner|decoder)\.ts$/, includeDependenciesRecursively: false },
+      ] } },
     },
   },
 });

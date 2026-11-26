@@ -32,7 +32,7 @@ function text(value: unknown, max: number, required = false): value is string {
 export function membershipBarcodeValue(number: string): string {
   return number.replace(/\s/g, '');
 }
-function validateBarcode(barcode: NonNullable<Card['barcode']>): void {
+export function validateBarcode(barcode: NonNullable<Card['barcode']>): void {
   if (!FORMATS.includes(barcode.format) || !text(barcode.value, 1024, true)) throw new WalletError('invalidBarcode');
   if ((barcode.format === 'qrcode' || barcode.format === 'azteccode') && new TextEncoder().encode(barcode.value).length > 1024) throw new WalletError('invalidBarcode');
   if (barcode.format === 'code128' && (!/^[\x20-\x7e]+$/.test(barcode.value) || barcode.value.length > 80)) throw new WalletError('invalidBarcode');
@@ -84,7 +84,7 @@ export function validateCard(value: unknown): Card {
     }
     const format = FORMATS.find((format) => format === source.format);
     if (!format) throw new WalletError('invalidBarcode');
-    barcode = { format, value: source.value === value.number ? membershipBarcodeValue(value.number) : source.value };
+    barcode = { format, value: source.value };
     validateBarcode(barcode);
   }
   return {
