@@ -49,5 +49,11 @@ export class WalletStore {
     return value;
   }
   async setNearbyEnabled(enabled: boolean): Promise<void> { await this.db.put('preferences', enabled, 'nearby-enabled'); }
+  async compactCards(): Promise<boolean | undefined> {
+    const value = await this.db.get('preferences', 'compact-cards');
+    if (value !== undefined && typeof value !== 'boolean') throw new WalletError('storage');
+    return value;
+  }
+  async setCompactCards(enabled: boolean): Promise<void> { await this.db.put('preferences', enabled, 'compact-cards'); }
   close(): void { this.db.close(); }
 }

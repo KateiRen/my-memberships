@@ -15,6 +15,25 @@ async function open(name = crypto.randomUUID()): Promise<WalletStore> {
 }
 afterEach(() => { connections.splice(0).forEach((store) => store.close()); });
 describe('transactional wallet storage', () => {
+  it('remembers compact previews independently of wallet replacement and other preferences', async () => {
+    const name = crypto.randomUUID();
+    const first = await open(name);
+    expect(await first.compactCards()).toBeUndefined();
+    await first.setCompactCards(true);
+    await first.setLanguage('de');
+    await first.setNearbyEnabled(false);
+    await first.replace([card], 0);
+    first.close();
+    const second = await open(name);
+    expect(await second.compactCards()).toBe(true);
+    await second.replace([], 1);
+    expect(await second.compactCards()).toBe(true);
+    expect(await second.language()).toBe('de');
+    expect(await second.nearbyEnabled()).toBe(false);
+    await second.setCompactCards(false);
+    second.close();
+    expect(await (await open(name)).compactCards()).toBe(false);
+  });
   it('remembers both location opt-in and refusal independently from wallet replacement and language', async () => {
     const name = crypto.randomUUID();
     const first = await open(name);

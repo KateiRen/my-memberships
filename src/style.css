@@ -54,6 +54,18 @@ main { max-width: 920px; min-height: calc(100dvh - 220px); margin: 0 auto; paddi
 .search-box input:focus { outline: none; }
 input::placeholder, textarea::placeholder { color: #737b72; opacity: 1; }
 .card-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.card-grid.compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.compact-card { display: flex; align-items: center; justify-content: center; aspect-ratio: 1.6; min-height: 88px; padding: 12px; text-align: center; border: 0; border-radius: 14px; }
+.compact-card h3 { overflow-wrap: anywhere; }
+.category-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: -12px 0 24px; }
+.category-filter { min-height: 44px; max-width: 100%; border: 1px solid var(--line); border-radius: 22px; padding: 6px 12px; background: #fff; font-size: .8rem; overflow-wrap: anywhere; }
+.category-filter[aria-pressed="true"] { background: var(--forest); color: #fff; border-color: var(--forest); }
+.preview-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; font-size: .85rem; }
+.preview-toggle input { flex-shrink: 0; width: 44px; height: 26px; border-radius: 20px; background: var(--muted); padding: 3px; cursor: pointer; }
+.preview-toggle input::before { content: ''; display: block; width: 20px; height: 20px; background: #fff; border-radius: 50%; }
+.preview-toggle input:checked { background: var(--forest); }
+.preview-toggle input:checked::before { transform: translateX(18px); }
+.preview-toggle input:disabled { opacity: .55; cursor: wait; }
 .wallet-section + .wallet-section { margin-top: 30px; }
 .wallet-section > h2 { margin-bottom: 16px; }
 .membership-card { display: block; min-width: 0; border: 1px solid var(--line); border-radius: 22px; background: #fff; overflow: hidden; box-shadow: 0 4px 14px #183c3405; }
@@ -163,6 +175,7 @@ dd { margin: 0; font-size: .95rem; overflow-wrap: anywhere; }
   main { padding: 42px 30px 25px; }
   .desktop-add { display: inline-flex; }
   .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 23px; }
+  .card-grid.compact-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .card-art { height: 170px; }
   .bottom-nav { left: 50%; right: auto; width: 460px; transform: translateX(-50%); bottom: 16px; border: 1px solid var(--line); border-radius: 24px; box-shadow: 0 4px 25px #183c3410; }
   .empty-state { padding: 5px 0 20px; }

@@ -50,6 +50,12 @@ Opening a card shows its name immediately followed by the barcode or QR code, wi
 
 When selecting a backup in settings, the app scrolls to the import preview and focuses **Replace wallet**, keeping the action above the bottom navigation. Review the preview before confirming; selecting a file alone does not replace your cards.
 
+## Wallet display and filters
+
+Settings place language selection above the location options. Enable **Use smaller card previews** there for compact cards: the entire card uses its first brand color and its name uses the second, with no separate caption or membership number underneath. The standard preview remains the default. This display preference is saved on the device, works offline, and is independent of wallet backups. Both the nearby and alphabetical sections use the selected preview style.
+
+Category toggles below name search are drawn from all categories in the wallet, including **No category** when needed. Select multiple categories to show cards in any selected category; no selection shows all categories. Category filters and name search apply together to both card sections. **Clear filters** resets both. Filters stay active when opening and returning from a card, but reset on page reload.
+
 ## Nearby cards
 
 In the wallet, a small location-pin button beside the location hint refreshes nearby suggestions. Turning nearby cards off remains available in settings.
