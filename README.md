@@ -44,7 +44,15 @@ The MVP includes manual card creation, editing and deletion, name search, alphab
 
 Camera scanning, other-wallet imports, nearby-business lookup, and cloud sync are outside the MVP.
 
+Opening a card shows its name immediately followed by the barcode or QR code, without a category emblem or caption. The optional save-location action appears inside the scan panel directly below the code and its number, before the scan hint.
+
+## Restoring a backup
+
+When selecting a backup in settings, the app scrolls to the import preview and focuses **Replace wallet**, keeping the action above the bottom navigation. Review the preview before confirming; selecting a file alone does not replace your cards.
+
 ## Nearby cards
+
+In the wallet, a small location-pin button beside the location hint refreshes nearby suggestions. Turning nearby cards off remains available in settings.
 
 Tap **Enable nearby cards** in the wallet or settings to allow location access. Once browser permission is granted, opening or returning to the app checks your position without delaying card access. When there are matches within **200 metres**, a separate **Nearby** section (German: **In der Nähe**) appears above **All cards**. Nearby matches are alphabetical; the complete alphabetical list below still includes those same cards. Search filters both sections. The extra section disappears when there are no matching search results nearby, location is disabled, or no usable position is available.
 
@@ -60,6 +68,24 @@ Matching runs on your device without external store searches, background trackin
 - **Website and in-app artwork:** [Cards fanned out of the wallet](assets/branding/F%C3%A4cher%20aus%20bunten%20Einkaufskarten.png).
 
 Keep these original images as branding sources; generate app-icon sizes from the wallet image when implementing the PWA.
+
+### Brand-color reference data
+
+[src/data/brand-colors.json](src/data/brand-colors.json) contains 1,000 records converted from the user-provided `brand_colors_kundenkarten.csv`. Each record preserves the source name, category, website, ordered pair of six-digit hex colors, and logo URL:
+
+```json
+{
+  "name": "H&M",
+  "category": "Mode",
+  "website": "https://www.hm.com",
+  "colors": ["#CC1F25", "#CC1F25"],
+  "logoUrl": "https://www.google.com/s2/favicons?sz=256&domain=hm.com"
+}
+```
+
+All source color values are syntactically valid; their brand accuracy has not been independently verified. The dataset has 941 distinct names, with 39 names appearing more than once across different websites. Those records remain separate, including differing color pairs. Some names look domain-derived (such as `Www`) and some categories are broad or questionable; review these before adding name matching. No aliases or replacement colors were invented, and identical color pairs were preserved.
+
+This is reference data for future color suggestions, not wallet data. The app does not yet import it or suggest colors from it, and no website or logo URL is fetched. When integrating suggestions, keep them available offline, respect the existing mobile build budgets, handle ambiguous names, and preserve user-selected colors.
 
 ## Planned card details
 

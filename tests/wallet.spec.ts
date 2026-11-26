@@ -139,12 +139,22 @@ test('German nearby section fits a narrow screen and disappears when all saved p
   await expect(page.getByRole('heading', { name: 'Einstellungen', exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Meine Wallet', exact: true }).click();
   await page.setViewportSize({ width: 320, height: 740 });
+  const refresh = page.getByRole('button', { name: 'Karten in der Nähe aktualisieren', exact: true });
+  await expect(refresh.locator('svg')).toHaveCount(1);
+  await expect(refresh.locator('.sr-only')).toHaveText('Karten in der Nähe aktualisieren');
+  await expect(page.getByRole('button', { name: 'Karten in der Nähe deaktivieren', exact: true })).toHaveCount(0);
+  expect(await refresh.evaluate((element) => {
+    const button = element.getBoundingClientRect();
+    const hint = element.parentElement!.querySelector('p')!.getBoundingClientRect();
+    return button.left >= hint.right && button.top < hint.bottom && button.bottom > hint.top;
+  })).toBe(true);
   await expect(page.locator('.wallet-section > h2')).toHaveText(['In der Nähe', 'Alle Karten']);
   await expect(page.getByRole('region', { name: 'In der Nähe', exact: true }).locator('.membership-card')).toHaveCount(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.evaluate(() => { document.documentElement.dataset.latitude = '50'; });
-  await page.getByRole('button', { name: 'Karten in der Nähe aktualisieren', exact: true }).click();
+  await refresh.click();
   await expect(page.getByRole('region', { name: 'In der Nähe', exact: true })).toHaveCount(0);
+  await expect(refresh.locator('svg')).toHaveCount(1);
   await expect(page.getByRole('region', { name: 'Alle Karten', exact: true }).locator('.membership-card h3')).toHaveText(['Alpha', 'Zoo']);
 });
 
@@ -326,6 +336,11 @@ for (const format of ['code128', 'code39', 'ean13', 'ean8', 'qrcode', 'azteccode
     await expect(page.locator('[name="barcode-value"]')).toHaveValue(compact);
     await page.getByRole('button', { name: 'Save card', exact: true }).click();
     await expect(page.locator('.barcode-image svg')).toBeVisible();
+    await expect(page.locator('.detail-title')).toHaveText('Spaced membership');
+    await expect(page.locator('.detail-title svg')).toHaveCount(0);
+    await expect(page.locator('.detail-title + .scan-panel > .barcode-image:first-child')).toBeVisible();
+    await expect(page.locator('.scan-panel > .barcode-value + .detail-location #save-location')).toHaveCount(1);
+    await expect(page.locator('.detail-location + .muted')).toBeVisible();
     if (format === 'qrcode' || format === 'azteccode') {
       const bounds = await page.locator('.barcode-image svg').boundingBox();
       if (!bounds) throw new Error('Matrix code is not visible');
@@ -343,6 +358,32 @@ for (const format of ['code128', 'code39', 'ean13', 'ean8', 'qrcode', 'azteccode
     await page.getByRole('textbox', { name: 'Membership number', exact: true }).fill(compact);
     await page.getByRole('button', { name: 'Save card', exact: true }).click();
     expect(await page.locator('.barcode-image').innerHTML()).toBe(svg);
+  });
+}
+for (const count of [0, 1, 10]) {
+  test(`shows the restore preview and replacement action after selecting a backup with ${count} cards`, async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 740 });
+    await page.goto('./#settings');
+    const cards = Array.from({ length: count }, (_, index) => ({
+      ...locatedCard(`card-${index}`),
+      name: `Card ${index} ${'Long membership name '.repeat(4)}`,
+    }));
+    await page.locator('#restore-file').scrollIntoViewIfNeeded();
+    await page.locator('#restore-file').setInputFiles({
+      name: 'wallet.json', mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify({ format: 'my-memberships', version: 1, cards })),
+    });
+    const replace = page.getByRole('button', { name: 'Replace wallet', exact: true });
+    await expect(replace).toBeFocused();
+    await expect(page.locator('.restore-preview')).toBeInViewport();
+    await expect(replace).toBeInViewport({ ratio: 1 });
+    await expect.poll(() => replace.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const navigation = document.querySelector('.bottom-nav')!.getBoundingClientRect();
+      return bounds.top >= 0 && bounds.bottom <= navigation.top;
+    })).toBe(true);
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page.locator('.restore-preview')).toHaveCount(0);
   });
 }
 test('backs up and restores all fields and rejects invalid imports without replacing cards', async ({ page }) => {

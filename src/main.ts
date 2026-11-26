@@ -93,11 +93,15 @@ function nearbyActionKey(): MessageKey {
   return locationPermission === 'denied' || nearbyEnabled === false
     ? 'askLocationAgain' : locationPermission === 'granted' ? 'refreshNearby' : 'enableNearby';
 }
+function nearbyActionContent(): string {
+  const label = escape(t(nearbyActionKey()));
+  return nearbyActionKey() === 'refreshNearby' ? `${icon('pin')}<span class="sr-only">${label}</span>` : label;
+}
 function nearbyControlsHtml(): string {
   return `<div class="nearby-controls">
     <p class="hint" aria-live="polite">${escape(t(locationRequest ? 'locationChecking' : locationMessage))}</p>
-    ${button('enable-nearby', escape(t(nearbyActionKey())), 'text-button', locationRequest ? 'disabled' : '')}
-    ${button('disable-nearby', escape(t('disableNearby')), 'text-button', nearbyEnabled !== false && locationPermission === 'granted' ? '' : 'hidden')}
+    ${button('enable-nearby', nearbyActionContent(), nearbyActionKey() === 'refreshNearby' ? 'icon-button' : 'text-button', `title="${escape(t(nearbyActionKey()))}" ${locationRequest ? 'disabled' : ''}`)}
+    ${route === 'settings' ? button('disable-nearby', escape(t('disableNearby')), 'text-button', nearbyEnabled !== false && locationPermission === 'granted' ? '' : 'hidden') : ''}
     </div>`;
 }
 function locationStateHtml(): string {
@@ -117,7 +121,12 @@ function updateNearbyUi(): void {
   const message = controls?.querySelector('p');
   if (message) message.textContent = t(locationRequest ? 'locationChecking' : locationMessage);
   const enable = controls?.querySelector<HTMLButtonElement>('[data-action="enable-nearby"]');
-  if (enable) { enable.textContent = t(nearbyActionKey()); enable.disabled = Boolean(locationRequest); }
+  if (enable) {
+    enable.innerHTML = nearbyActionContent();
+    enable.className = nearbyActionKey() === 'refreshNearby' ? 'icon-button' : 'text-button';
+    enable.title = t(nearbyActionKey());
+    enable.disabled = Boolean(locationRequest);
+  }
   const disable = controls?.querySelector<HTMLButtonElement>('[data-action="disable-nearby"]');
   if (disable) disable.hidden = nearbyEnabled === false || locationPermission !== 'granted';
   const state = document.querySelector('#location-state');
@@ -320,13 +329,11 @@ function renderDetail(card: Card): void {
   try { barcode = card.barcode ? barcodeSvg(card.barcode) : ''; }
   catch (error) { report(error); }
   shell(`${backLink()}
-    <section class="detail-title"><span class="detail-emblem" style="--color-one:${card.colors[0]};--color-two:${card.colors[1]}">${icon('bag')}</span>
-      <p class="eyebrow">${escape(card.category || t('card'))}</p><h1 tabindex="-1">${escape(card.name)}</h1>
-      <span id="save-location">${saveLocationHtml(card)}</span>
-      <p id="location-detail-status" class="hint" aria-live="polite">${locationRequest ? escape(t('locationChecking')) : ''}</p></section>
+    <section class="detail-title"><h1 tabindex="-1">${escape(card.name)}</h1></section>
     <section class="scan-panel ${card.barcode?.format === 'qrcode' || card.barcode?.format === 'azteccode' ? 'matrix' : ''}" aria-label="${escape(t('barcode'))}">
-      <p class="eyebrow">${escape(t('showToScan'))}</p>
       ${barcode ? `<div class="barcode-image" role="img" aria-label="${escape(t('barcode'))}: ${escape(card.barcode?.value ?? '')}">${barcode}</div><p class="barcode-value mono preserve-lines">${escape(displayedBarcodeValue)}</p>` : ''}
+      <div class="detail-location"><span id="save-location">${saveLocationHtml(card)}</span>
+        <p id="location-detail-status" class="hint" aria-live="polite">${locationRequest ? escape(t('locationChecking')) : ''}</p></div>
       <p class="muted">${escape(t(barcode ? 'scanHint' : 'noBarcodeHint'))}</p>
     </section>
     <section class="panel detail-info"><dl><div><dt>${escape(t('number'))}</dt><dd class="mono preserve-lines">${escape(card.number)}</dd></div>
@@ -463,6 +470,10 @@ app.addEventListener('change', (event) => {
       if (file.size > MAX_BACKUP_BYTES) throw new WalletError('fileTooLarge');
       pendingRestore = parseBackup(await file.text());
       renderSettings();
+      const replaceButton = app.querySelector<HTMLButtonElement>('[data-action="replace"]');
+      app.querySelector('.restore-preview')?.scrollIntoView({ block: 'start' });
+      replaceButton?.focus({ preventScroll: true });
+      replaceButton?.scrollIntoView({ block: 'nearest' });
     }, 'fileError');
     input.value = '';
   }
