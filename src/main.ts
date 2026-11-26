@@ -4,6 +4,7 @@ import { barcodeSvg, backupJson, FORMATS, MAX_BACKUP_BYTES, membershipBarcodeVal
 import { WalletStore } from './storage';
 import { translate, type MessageKey } from './i18n';
 import { nearbyCards, requestPosition, LocationError, POSITION_MAX_AGE_MS, type CurrentPosition } from './nearby';
+import { brandColors } from './brands';
 
 const root = document.querySelector<HTMLDivElement>('#app');
 if (!root) throw new Error('Missing application root');
@@ -29,6 +30,8 @@ let locationEpoch = 0;
 let positionExpiry: ReturnType<typeof setTimeout> | undefined;
 let nearbyEnabled: boolean | undefined;
 let nearbyInitialization: Promise<void> | undefined;
+let brands: Record<string, [string, string] | null> | undefined;
+let brandsLoading: Promise<void> | undefined;
 const t = (key: MessageKey) => translate(language, key);
 const escape = (value: string | number) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
 const icon = (name: 'wallet' | 'plus' | 'search' | 'settings' | 'arrow' | 'bag' | 'shield' | 'pin') => {
@@ -302,7 +305,7 @@ function renderEditor(card?: Card): void {
   const barcode = card?.barcode;
   const sameNumber = !barcode || barcode.value === membershipBarcodeValue(card?.number ?? '');
   shell(`${backLink()}<section class="page-heading"><div><p class="eyebrow">${escape(t('formIntro'))}</p><h1 tabindex="-1">${escape(t(card ? 'editCard' : 'newCard'))}</h1></div></section>
-    <form id="card-form" class="editor" autocomplete="off">
+    <form id="card-form" class="editor" autocomplete="off" ${card ? '' : 'data-brand-colors="#c5ed76,#275c4b"'}>
       <p class="muted">${escape(t('requiredNote'))}</p>
       <section class="panel"><h2>${escape(t('cardDetails'))}</h2>
         ${field('name', 'name', card?.name ?? '', `required maxlength="100" placeholder="${escape(t('namePlaceholder'))}"`)}
@@ -314,7 +317,7 @@ function renderEditor(card?: Card): void {
       <section class="panel"><h2>${escape(t('colors'))}</h2><div class="field-pair">
         ${field('color-one', 'primaryColor', colors[0], 'type="color" required')}
         ${field('color-two', 'secondaryColor', colors[1], 'type="color" required')}
-      </div></section>
+      </div><p id="brand-status" class="hint" aria-live="polite"></p></section>
       <section class="panel"><h2>${escape(t('barcode'))}</h2><p class="muted">${escape(t('barcodeHelp'))}</p>
         <label class="field"><span>${escape(t('barcodeFormat'))}</span><select name="barcode-format" id="barcode-format"><option value="">${escape(t('noBarcode'))}</option>${FORMATS.map((format) => `<option value="${format}" ${barcode?.format === format ? 'selected' : ''}>${({ code128: 'Code 128', code39: 'Code 39', ean13: 'EAN-13', ean8: 'EAN-8', qrcode: 'QR', azteccode: 'Aztec' })[format]}</option>`).join('')}</select></label>
         <div id="barcode-fields" ${barcode ? '' : 'hidden'}>
@@ -328,6 +331,45 @@ function renderEditor(card?: Card): void {
       </section>
       <div class="form-actions"><button type="submit" class="button primary">${escape(t('save'))}</button>${button('cancel', escape(t('cancel')))}</div>
     </form>`);
+  if (!card) void loadBrands();
+}
+function applyBrandColors(): void {
+  const form = app.querySelector<HTMLFormElement>('#card-form[data-brand-colors]');
+  if (!form || !brands) return;
+  const name = form.querySelector<HTMLInputElement>('[name="name"]')?.value ?? '';
+  const colors = brandColors(name, brands);
+  const inputs = form.querySelectorAll<HTMLInputElement>('input[type="color"]');
+  const status = form.querySelector('#brand-status');
+  if (Array.from(inputs, (input) => input.value).join() !== form.dataset.brandColors) {
+    form.removeAttribute('data-brand-colors');
+    status?.replaceChildren();
+    return;
+  }
+  inputs.forEach((input, index) => { input.value = colors?.[index] ?? (index === 0 ? '#c5ed76' : '#275c4b'); });
+  form.dataset.brandColors = Array.from(inputs, (input) => input.value).join();
+  if (status) status.textContent = colors ? t('brandColorsApplied') : '';
+}
+async function loadBrands(): Promise<void> {
+  if (brands || brandsLoading) return brandsLoading;
+  brandsLoading = (async () => {
+    try {
+      const response = await fetch(`${import.meta.env.BASE_URL}brand-colors.json`);
+      if (!response.ok) throw new Error('Brand colors unavailable');
+      const data: unknown = await response.json();
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid brand colors');
+      const validated: Record<string, [string, string] | null> = Object.create(null);
+      for (const [name, colors] of Object.entries(data)) {
+        if (colors === null) validated[name] = null;
+        else if (Array.isArray(colors) && colors.length === 2 && colors.every((color: unknown) => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color))) {
+          validated[name] = [colors[0], colors[1]];
+        } else throw new Error('Invalid brand colors');
+      }
+      brands = validated;
+      applyBrandColors();
+    } catch { showNotice('brandColorsUnavailable', true); }
+    finally { brandsLoading = undefined; }
+  })();
+  return brandsLoading;
 }
 function renderDetail(card: Card): void {
   let barcode = '';
@@ -436,6 +478,14 @@ app.addEventListener('input', (event) => {
   const input = event.target;
   if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement || input instanceof HTMLSelectElement)) return;
   if (input.closest('#card-form')) dirty = true;
+  if (input.getAttribute('name') === 'name' && input.closest('form[data-brand-colors]')) {
+    applyBrandColors();
+    if (!brands) void loadBrands();
+  }
+  if (input instanceof HTMLInputElement && input.type === 'color') {
+    input.closest('form')?.removeAttribute('data-brand-colors');
+    document.querySelector('#brand-status')?.replaceChildren();
+  }
   if (input.id === 'search') {
     search = input.value;
     const grid = document.querySelector('#card-grid');
@@ -450,6 +500,10 @@ app.addEventListener('change', (event) => {
   const input = event.target;
   if (!(input instanceof HTMLInputElement || input instanceof HTMLSelectElement)) return;
   if (input.closest('#card-form')) dirty = true;
+  if (input instanceof HTMLInputElement && input.type === 'color') {
+    input.closest('form')?.removeAttribute('data-brand-colors');
+    document.querySelector('#brand-status')?.replaceChildren();
+  }
   if (input.id === 'barcode-format') {
     const fields = document.querySelector<HTMLElement>('#barcode-fields');
     if (fields) fields.hidden = !input.value;

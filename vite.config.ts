@@ -25,12 +25,17 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,png,webp,woff2}'],
+        globPatterns: ['**/*.{js,css,html,png,webp,woff2}', 'brand-colors.json'],
         navigateFallback: '/my-memberships/index.html',
         navigateFallbackAllowlist: [/^\/my-memberships\//],
         cleanupOutdatedCaches: true,
       },
     }),
   ],
-  build: { target: 'es2022' },
+  build: {
+    target: 'es2022',
+    rolldownOptions: {
+      output: { codeSplitting: { groups: [{ name: 'barcodes', test: /node_modules[/\\]bwip-js/ }] } },
+    },
+  },
 });

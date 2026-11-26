@@ -59,6 +59,83 @@ async function restoreCards(page: Page, cards: Card[]): Promise<void> {
   await expect(page.getByRole('button', { name: 'Replace wallet', exact: true })).toHaveCount(0);
 }
 
+test('brand colors follow new-card names, persist after saving, and work offline', async ({ page, context }) => {
+  await page.goto('./#new');
+  const name = page.getByRole('textbox', { name: 'Card name', exact: true });
+  const first = page.locator('[name="color-one"]');
+  const second = page.locator('[name="color-two"]');
+  await name.fill('Target');
+  await expect(first).toHaveValue('#cc0000');
+  await expect(second).toHaveValue('#eb9d9d');
+  await expect(page.locator('#brand-status')).toContainText('Matching brand colors applied');
+  await name.fill('Unknown shop');
+  await expect(first).toHaveValue('#c5ed76');
+  await expect(second).toHaveValue('#275c4b');
+  await name.fill(' target rewards ');
+  await expect(first).toHaveValue('#cc0000');
+  await page.getByRole('textbox', { name: 'Membership number', exact: true }).fill('0001');
+  await page.getByRole('button', { name: 'Save card', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'target rewards', exact: true })).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(first).toHaveValue('#cc0000');
+  await name.fill('H&M');
+  await expect(second).toHaveValue('#eb9d9d');
+  await page.getByRole('button', { name: 'Save card', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'H&M', exact: true })).toBeVisible();
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
+  await context.setOffline(true);
+  await page.reload();
+  await page.getByRole('button', { name: 'Add a card', exact: true }).last().click();
+  await name.fill('H & M');
+  await expect(first).toHaveValue('#cc1f25');
+  await expect(second).toHaveValue('#cc1f25');
+  await first.fill('#123456');
+  await name.fill('Target');
+  await expect(first).toHaveValue('#123456');
+  await expect(second).toHaveValue('#cc1f25');
+  await expect(page.locator('#brand-status')).toBeEmpty();
+});
+
+for (const manual of [false, true]) {
+test(`late brand responses ${manual ? 'preserve manual colors' : 'use the latest name'}`, async ({ page }) => {
+  let release: (() => void) | undefined;
+  await page.route('**/brand-colors.json', async (route) => {
+    await new Promise<void>((resolve) => { release = resolve; });
+    await route.fulfill({ json: { target: ['#cc0000', '#eb9d9d'], hm: ['#cc1f25', '#cc1f25'] } });
+  });
+  await page.goto('./#new');
+  await expect.poll(() => Boolean(release)).toBe(true);
+  await page.getByRole('textbox', { name: 'Card name', exact: true }).fill('Target');
+  await page.getByRole('textbox', { name: 'Card name', exact: true }).fill('H&M');
+  if (manual) await page.locator('[name="color-one"]').fill('#123456');
+  release?.();
+  if (manual) {
+    await expect.poll(() => page.locator('#card-form').getAttribute('data-brand-colors')).toBeNull();
+    await expect(page.locator('[name="color-one"]')).toHaveValue('#123456');
+    await expect(page.locator('[name="color-two"]')).toHaveValue('#275c4b');
+  } else {
+    await expect(page.locator('[name="color-one"]')).toHaveValue('#cc1f25');
+    await expect(page.locator('[name="color-two"]')).toHaveValue('#cc1f25');
+  }
+});
+}
+
+test('brand-loading errors are reported and a later name entry retries', async ({ page }) => {
+  let requests = 0;
+  await page.route('**/brand-colors.json', async (route) => {
+    requests++;
+    if (requests === 1) await route.fulfill({ status: 503, body: 'Unavailable' });
+    else await route.fulfill({ json: { target: ['#cc0000', '#eb9d9d'] } });
+  });
+  await page.goto('./#new');
+  await expect(page.getByRole('alert')).toContainText('Brand colors could not be loaded');
+  await page.getByRole('textbox', { name: 'Card name', exact: true }).fill('Target');
+  await expect(page.locator('[name="color-one"]')).toHaveValue('#cc0000');
+});
+
 test('compact previews persist offline, use exactly the brand colors, and keep card navigation', async ({ page, context }) => {
   page.on('dialog', (dialog) => dialog.accept());
   const cards = [locatedCard('Alpha'), locatedCard('Beta')];

@@ -91,7 +91,9 @@ Keep these original images as branding sources; generate app-icon sizes from the
 
 All source color values are syntactically valid; their brand accuracy has not been independently verified. The dataset has 941 distinct names, with 39 names appearing more than once across different websites. Those records remain separate, including differing color pairs. Some names look domain-derived (such as `Www`) and some categories are broad or questionable; review these before adding name matching. No aliases or replacement colors were invented, and identical color pairs were preserved.
 
-This is reference data for future color suggestions, not wallet data. The app does not yet import it or suggest colors from it, and no website or logo URL is fetched. When integrating suggestions, keep them available offline, respect the existing mobile build budgets, handle ambiguous names, and preserve user-selected colors.
+When creating a card, entering a matching brand name automatically fills both colors. Matching ignores case, punctuation, spaces, and accents; common membership suffixes such as "Rewards", "Card", or "Kundenkarte" are supported. Partial names and conflicting palettes are not guessed. For example, **Target** uses `#CC0000` and `#EB9D9D`. Changing to another matching name updates the colors; an unmatched name restores the default palette until you manually change a color. Changing either color stops automatic updates for that new card. Existing cards are never recolored when editing their names.
+
+The asset step validates the reference data and generates a compact name-to-palette lookup, omitting metadata and marking conflicting palettes as ambiguous. This lookup is fetched locally and precached for offline use, keeping the complete reference file out of the JavaScript bundle. No website or logo URL is fetched. A loading failure is shown explicitly; manual colors remain available and entering the name again retries. The barcode library is bundled separately to stay within the unchanged mobile asset budgets.
 
 ## Planned card details
 

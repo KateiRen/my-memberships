@@ -3,6 +3,7 @@
 /coverage/
 /public/icons/
 /public/branding/
+/public/brand-colors.json
 /playwright-report/
 /test-results/
 *.log
