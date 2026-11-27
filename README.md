@@ -58,11 +58,11 @@ After detection, capture stops and the editor shows the exact decoded payload an
 
 When selecting a backup in settings, the app scrolls to the import preview and focuses **Replace wallet**, keeping the action above the bottom navigation. Review the preview before confirming; selecting a file alone does not replace your cards.
 
-## Wallet display and filters
+## Wallet display and search
 
-Settings place language selection above the location options. Enable **Use smaller card previews** there for compact cards: the entire card uses its first brand color and its name uses the second, with no separate caption or membership number underneath. The standard preview remains the default. This display preference is saved on the device, works offline, and is independent of wallet backups. Both the nearby and alphabetical sections use the selected preview style.
+Settings place language and **Wallet display** above the location options. Choose **Large cards** (the default), **Small cards**, or **List view**. Large cards hide the category. Small cards are grouped under category headings: each card uses its first brand color and its name uses the second, without a separate caption or membership number. List view groups compact rows under category headings, with a brand-colored thumbnail, card name, and opening chevron. Cards without a category appear under **No category**. Categories and cards within each category are sorted by locale.
 
-Category toggles below name search are drawn from all categories in the wallet, including **No category** when needed. Select multiple categories to show cards in any selected category; no selection shows all categories. Category filters and name search apply together to both card sections. **Clear filters** resets both. Filters stay active when opening and returning from a card, but reset on page reload.
+The display preference is saved on the device, works offline, and is independent of wallet backups. Existing smaller-preview preferences are preserved. Nearby and all-card sections use the same selected view. There are no category filter buttons; search matches names or categories in every view and filters both sections. **Clear search** resets it. Search stays active when opening and returning from a card, but resets on page reload.
 
 ## Nearby cards
 

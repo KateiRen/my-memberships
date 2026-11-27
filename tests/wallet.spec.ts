@@ -261,8 +261,8 @@ test('compact previews persist offline, use exactly the brand colors, and keep c
   page.on('dialog', (dialog) => dialog.accept());
   const cards = [locatedCard('Alpha'), locatedCard('Beta')];
   await restoreCards(page, cards);
-  const toggle = page.getByRole('switch', { name: 'Use smaller card previews' });
-  await expect(toggle).not.toBeChecked();
+  const display = page.getByRole('combobox', { name: 'Wallet display' });
+  await expect(display).toHaveValue('standard');
   expect(await page.locator('#language').evaluate((element) =>
     Boolean(element.compareDocumentPosition(document.querySelector('#location-state')!) & Node.DOCUMENT_POSITION_FOLLOWING),
   )).toBe(true);
@@ -270,12 +270,12 @@ test('compact previews persist offline, use exactly the brand colors, and keep c
   const fullSize = await page.locator('#all-cards .membership-card').first().boundingBox();
   if (!fullSize) throw new Error('Standard card is not visible');
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  await toggle.check();
-  await expect(toggle).toBeEnabled();
+  await display.selectOption('compact');
+  await expect(display).toBeEnabled();
   await page.getByRole('link', { name: 'My wallet', exact: true }).click();
   const previews = page.locator('#all-cards .compact-card');
   await expect(previews).toHaveCount(2);
-  await expect(previews.locator('h3')).toHaveText(['Alpha', 'Beta']);
+  await expect(previews.locator('h4')).toHaveText(['Alpha', 'Beta']);
   await expect(page.locator('.card-caption, .card-art')).toHaveCount(0);
   expect(await previews.first().evaluate((element) => {
     const style = getComputedStyle(element);
@@ -294,62 +294,90 @@ test('compact previews persist offline, use exactly the brand colors, and keep c
   await previews.first().click();
   await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  await expect(toggle).toBeChecked();
-  await toggle.uncheck();
-  await expect(toggle).toBeEnabled();
+  await expect(display).toHaveValue('compact');
+  await display.selectOption('standard');
+  await expect(display).toBeEnabled();
   await page.getByRole('link', { name: 'My wallet', exact: true }).click();
   await expect(page.locator('#all-cards .card-caption h3')).toHaveText(['Alpha', 'Beta']);
   await page.reload();
   await expect(page.locator('.compact-card')).toHaveCount(0);
 });
 
-test('category toggles combine with search in both card sections and fit compact German previews', async ({ page }) => {
+for (const view of ['compact', 'list'] as const) {
+test(`${view} view groups categories, searches both sections, persists offline and fits German narrow screens`, async ({ page, context }) => {
+  await mockLocation(page, 'granted');
+  page.on('dialog', (dialog) => dialog.accept());
+  await restoreCards(page, [
+    { ...locatedCard('Alpha', 52.52), category: 'Travel' },
+    { ...locatedCard('Beta', 52.52), category: 'Shopping & Rewards' },
+    { ...locatedCard('Zebra'), category: 'Shopping & Rewards' },
+    locatedCard('Gamma'),
+  ]);
+  const display = page.getByRole('combobox', { name: 'Wallet display' });
+  await display.selectOption(view);
+  await expect(display).toBeEnabled();
+  await page.getByRole('link', { name: 'My wallet', exact: true }).click();
+  await expect(page.locator('.category-filters, [data-action="filter-category"]')).toHaveCount(0);
+  await expect(page.locator('#all-cards .category-heading')).toHaveText(['No category', 'Shopping & Rewards', 'Travel']);
+  await expect(page.locator('#nearby-cards .category-heading')).toHaveText(['Shopping & Rewards', 'Travel']);
+  await expect(page.locator('#all-cards h4')).toHaveText(['Gamma', 'Beta', 'Zebra', 'Alpha']);
+  if (view === 'list') {
+    await expect(page.locator('#all-cards .card-list')).toHaveCount(3);
+    await expect(page.locator('#all-cards .list-card')).toHaveCount(4);
+    const box = await page.locator('#all-cards .list-card').first().boundingBox();
+    expect(box && box.height >= 44 && box.height <= 88).toBeTruthy();
+  }
+  await page.getByRole('searchbox').fill(' shopping ');
+  await expect(page.locator('#all-cards .category-heading')).toHaveText(['Shopping & Rewards']);
+  await expect(page.locator('#all-cards h4')).toHaveText(['Beta', 'Zebra']);
+  await expect(page.locator('#nearby-cards h4')).toHaveText(['Beta']);
+  await page.getByRole('searchbox').fill('Missing');
+  await expect(page.getByRole('heading', { name: 'No matching cards' })).toBeVisible();
+  await expect(page.locator('#nearby-cards')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Clear search', exact: true }).click();
+  await expect(page.getByRole('searchbox')).toHaveValue('');
+  await page.getByRole('searchbox').fill('Gamma');
+  await expect(page.locator('#all-cards h4')).toHaveText(['Gamma']);
+  await expect(page.locator('#nearby-cards')).toHaveCount(0);
+  await page.getByRole('link', { name: 'Open card: Gamma', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Gamma', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Back to wallet', exact: true }).click();
+  await expect(page.getByRole('searchbox')).toHaveValue('Gamma');
+  await page.getByRole('searchbox').fill('');
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.locator('#all-cards h4')).toHaveText(['Gamma', 'Beta', 'Zebra', 'Alpha']);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(display).toHaveValue(view);
+  await page.locator('#language').selectOption('de');
+  await expect(page.getByRole('combobox', { name: 'Wallet-Ansicht' })).toHaveValue(view);
+  await page.getByRole('link', { name: 'Meine Wallet', exact: true }).click();
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+  await expect(page.getByRole('heading', { name: 'Ohne Kategorie', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+}
+
+test('large cards hide categories and category filters while category search works', async ({ page }) => {
   await mockLocation(page, 'granted');
   page.on('dialog', (dialog) => dialog.accept());
   await restoreCards(page, [
     { ...locatedCard('Alpha', 52.52), category: 'Shopping & Rewards' },
-    { ...locatedCard('Beta', 52.52), category: 'Travel' },
-    locatedCard('Gamma'),
+    { ...locatedCard('Beta'), category: 'Travel' },
   ]);
-  await page.getByRole('switch', { name: 'Use smaller card previews' }).check();
-  await expect(page.getByRole('switch')).toBeEnabled();
   await page.getByRole('link', { name: 'My wallet', exact: true }).click();
-  const filters = page.getByRole('group', { name: 'Filter by category' });
-  await expect(filters.getByRole('button')).toHaveText(['No category', 'Shopping & Rewards', 'Travel']);
-  expect(await filters.evaluate((element) =>
-    element.getBoundingClientRect().top >= document.querySelector('.search-box')!.getBoundingClientRect().bottom,
-  )).toBe(true);
-  await filters.getByRole('button', { name: 'Travel', exact: true }).click();
-  await expect(page.locator('#all-cards h3')).toHaveText(['Beta']);
-  await expect(page.locator('#nearby-cards h3')).toHaveText(['Beta']);
-  await filters.getByRole('button', { name: 'Shopping & Rewards', exact: true }).click();
-  await expect(page.locator('#all-cards h3')).toHaveText(['Alpha', 'Beta']);
-  await expect(page.locator('#nearby-cards .compact-card')).toHaveCount(2);
-  await page.getByRole('searchbox').fill('Alpha');
-  await expect(page.locator('#all-cards h3')).toHaveText(['Alpha']);
-  await expect(page.locator('#nearby-cards h3')).toHaveText(['Alpha']);
-  await filters.getByRole('button', { name: 'Shopping & Rewards', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'No matching cards' })).toBeVisible();
-  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
-  await expect(page.getByRole('searchbox')).toHaveValue('');
-  await expect(page.locator('#all-cards h3')).toHaveText(['Alpha', 'Beta', 'Gamma']);
-  await expect(filters.locator('[aria-pressed="true"]')).toHaveCount(0);
-  await filters.getByRole('button', { name: 'No category', exact: true }).click();
-  await expect(page.locator('#all-cards h3')).toHaveText(['Gamma']);
+  await expect(page.locator('.card-category, .category-heading, .category-filters')).toHaveCount(0);
+  await expect(page.getByText('Shopping & Rewards', { exact: true })).toHaveCount(0);
+  await page.getByRole('searchbox').fill('REWARDS');
+  await expect(page.locator('#all-cards .card-caption h3')).toHaveText(['Alpha']);
+  await expect(page.locator('#nearby-cards .card-caption h3')).toHaveText(['Alpha']);
+  await page.getByRole('searchbox').fill('travel');
+  await expect(page.locator('#all-cards .card-caption h3')).toHaveText(['Beta']);
   await expect(page.locator('#nearby-cards')).toHaveCount(0);
-  await page.getByRole('link', { name: 'Open card: Gamma', exact: true }).click();
-  await page.getByRole('link', { name: 'Back to wallet', exact: true }).click();
-  await expect(filters.getByRole('button', { name: 'No category' })).toHaveAttribute('aria-pressed', 'true');
-  await filters.getByRole('button', { name: 'No category', exact: true }).click();
-  await expect(page.locator('#all-cards h3')).toHaveText(['Alpha', 'Beta', 'Gamma']);
-  await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  await page.locator('#language').selectOption('de');
-  await expect(page.getByRole('switch', { name: 'Kleinere Kartenvorschau verwenden' })).toBeChecked();
-  await page.getByRole('link', { name: 'Meine Wallet', exact: true }).click();
-  await page.setViewportSize({ width: 320, height: 740 });
-  await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
-  await expect(page.getByRole('button', { name: 'Ohne Kategorie', exact: true })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test('location is opt-in and a card can save its current area once', async ({ page }) => {

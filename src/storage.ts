@@ -1,9 +1,14 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { validateCards, WalletError, type Language, type Snapshot } from './model';
 
+export const CARD_DISPLAYS = ['standard', 'compact', 'list'] as const;
+export type CardDisplay = typeof CARD_DISPLAYS[number];
+export function isCardDisplay(value: unknown): value is CardDisplay {
+  return CARD_DISPLAYS.some((display) => display === value);
+}
 interface WalletDB extends DBSchema {
   wallet: { key: string; value: Snapshot };
-  preferences: { key: string; value: Language | boolean };
+  preferences: { key: string; value: Language | boolean | CardDisplay };
 }
 export class WalletStore {
   private constructor(private readonly db: IDBPDatabase<WalletDB>) {}
@@ -49,11 +54,16 @@ export class WalletStore {
     return value;
   }
   async setNearbyEnabled(enabled: boolean): Promise<void> { await this.db.put('preferences', enabled, 'nearby-enabled'); }
-  async compactCards(): Promise<boolean | undefined> {
-    const value = await this.db.get('preferences', 'compact-cards');
-    if (value !== undefined && typeof value !== 'boolean') throw new WalletError('storage');
-    return value;
+  async cardDisplay(): Promise<CardDisplay> {
+    const value = await this.db.get('preferences', 'card-display');
+    if (value !== undefined) {
+      if (!isCardDisplay(value)) throw new WalletError('storage');
+      return value;
+    }
+    const legacy = await this.db.get('preferences', 'compact-cards');
+    if (legacy !== undefined && typeof legacy !== 'boolean') throw new WalletError('storage');
+    return legacy ? 'compact' : 'standard';
   }
-  async setCompactCards(enabled: boolean): Promise<void> { await this.db.put('preferences', enabled, 'compact-cards'); }
+  async setCardDisplay(display: CardDisplay): Promise<void> { await this.db.put('preferences', display, 'card-display'); }
   close(): void { this.db.close(); }
 }

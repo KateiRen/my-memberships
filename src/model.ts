@@ -112,6 +112,6 @@ function snapshotJson(cards: Card[]): string { return `${JSON.stringify({ format
 export function backupJson(cards: Card[]): string { return snapshotJson(validateCards(cards)); }
 export function sortCards(cards: Card[], language: Language, search = ''): Card[] {
   const query = search.trim().toLocaleLowerCase(language);
-  return cards.filter((card) => card.name.toLocaleLowerCase(language).includes(query))
+  return cards.filter((card) => card.name.toLocaleLowerCase(language).includes(query) || card.category.toLocaleLowerCase(language).includes(query))
     .sort((a, b) => a.name.localeCompare(b.name, language, { sensitivity: 'base' }) || a.id.localeCompare(b.id));
 }

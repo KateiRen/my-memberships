@@ -1,7 +1,7 @@
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { barcodeSvg, backupJson, FORMATS, MAX_BACKUP_BYTES, membershipBarcodeValue, parseBackup, sortCards, validateCard, WalletError, type Card, type Language, type Snapshot } from './model';
-import { WalletStore } from './storage';
+import { CARD_DISPLAYS, isCardDisplay, WalletStore, type CardDisplay } from './storage';
 import { translate, type MessageKey } from './i18n';
 import { nearbyCards, requestPosition, LocationError, POSITION_MAX_AGE_MS, type CurrentPosition } from './nearby';
 import { brandColors } from './brands';
@@ -15,8 +15,7 @@ let snapshot: Snapshot = { revision: 0, cards: [] };
 let dirty = false;
 let busy = false;
 let search = '';
-let compactCards = false;
-const selectedCategories = new Set<string>();
+let cardDisplay: CardDisplay = 'standard';
 let route = '';
 let updateAvailable = false;
 let pendingRestore: Card[] | null = null;
@@ -254,36 +253,52 @@ function shell(content: string): void {
 }
 function countLabel(count: number): string { return `${count} ${t(count === 1 ? 'card' : 'cards')}`; }
 function listHtml(): string {
-  const cards = sortCards(snapshot.cards, language, search).filter((card) => !selectedCategories.size || selectedCategories.has(card.category));
-  if (!cards.length) return `<section class="no-results"><h2>${escape(t('noResults'))}</h2><p>${escape(t('noResultsText'))}</p>${button('clear-search', escape(t(selectedCategories.size ? 'clearFilters' : 'clearSearch')))}</section>`;
+  const cards = sortCards(snapshot.cards, language, search);
+  if (!cards.length) return `<section class="no-results"><h2>${escape(t('noResults'))}</h2>${button('clear-search', escape(t('clearSearch')))}</section>`;
   const nearby = nearbyCards(cards, freshPosition());
   return `${nearby.length ? `<section id="nearby-cards" class="wallet-section" aria-labelledby="nearby-heading">
       <h2 id="nearby-heading">${escape(t('nearbyCard'))}</h2>
-      <div class="card-grid ${compactCards ? 'compact-grid' : ''}">${nearby.map((card) => membershipCardHtml(card, true)).join('')}</div>
+      ${cardCollectionHtml(nearby, true)}
     </section>` : ''}
     <section id="all-cards" class="wallet-section" aria-labelledby="all-cards-heading">
       <h2 id="all-cards-heading">${escape(t('allCards'))}</h2>
-      <div class="card-grid ${compactCards ? 'compact-grid' : ''}">${cards.map((card) => membershipCardHtml(card)).join('')}</div>
+      ${cardCollectionHtml(cards)}
     </section>`;
 }
+function cardCollectionHtml(cards: Card[], nearby = false): string {
+  if (cardDisplay === 'standard') return `<div class="card-grid">${cards.map((card) => membershipCardHtml(card, nearby)).join('')}</div>`;
+  const groups = new Map<string, Card[]>();
+  for (const card of cards) {
+    const group = groups.get(card.category) ?? [];
+    group.push(card);
+    groups.set(card.category, group);
+  }
+  const list = cardDisplay === 'list';
+  const tag = list ? 'ul' : 'div';
+  return [...groups].sort(([a], [b]) => (a || t('noCategory')).localeCompare(b || t('noCategory'), language))
+    .map(([category, members]) => `<section class="category-section">
+      <h3 class="category-heading">${escape(category || t('noCategory'))}</h3>
+      <${tag} class="${list ? 'card-list' : 'card-grid compact-grid'}">${members.map((card) => list ? `<li>${membershipCardHtml(card)}</li>` : membershipCardHtml(card)).join('')}</${tag}>
+    </section>`).join('');
+}
 function membershipCardHtml(card: Card, nearby = false): string {
-  if (compactCards) return `<a href="#card/${escape(card.id)}" data-route="card/${escape(card.id)}" class="membership-card compact-card" style="background:${card.colors[0]};color:${card.colors[1]}" aria-label="${escape(t('openCard'))}: ${escape(card.name)}"><h3>${escape(card.name)}</h3></a>`;
-  return `<a href="#card/${escape(card.id)}" data-route="card/${escape(card.id)}" class="membership-card" aria-label="${escape(t('openCard'))}: ${escape(card.name)}">
-      <div class="card-art" style="--color-one:${card.colors[0]};--color-two:${card.colors[1]}">
-        <span class="card-emblem">${icon('bag')}</span><span class="card-category">${escape(card.category || t('card'))}</span>
+  const heading = cardDisplay === 'standard' ? 'h3' : 'h4';
+  const title = `<${heading}>${escape(card.name)}</${heading}>`;
+  const content = cardDisplay === 'compact' ? title : cardDisplay === 'list' ? `
+      <span class="list-card-art" aria-hidden="true">${icon('bag')}</span>
+      <div class="list-card-caption">${title}</div>` : `
+      <div class="card-art">
+        <span class="card-emblem">${icon('bag')}</span>
         <span class="card-monogram" aria-hidden="true">${escape(Array.from(card.name)[0] ?? '')}</span>
       </div>
-      <div class="card-caption"><div><h3>${escape(card.name)}</h3>${nearby ? `<span class="nearby-badge">${icon('pin')}${escape(t('nearbyCard'))}</span>` : ''}<p class="mono">•••• ${escape(card.number.slice(-4))}</p></div><span class="card-open" aria-hidden="true">↗</span></div>
-    </a>`;
+      <div class="card-caption"><div>${title}${nearby ? `<span class="nearby-badge">${icon('pin')}${escape(t('nearbyCard'))}</span>` : ''}<p class="mono">•••• ${escape(card.number.slice(-4))}</p></div><span class="card-open" aria-hidden="true">↗</span></div>`;
+  return `<a href="#card/${escape(card.id)}" data-route="card/${escape(card.id)}" aria-label="${escape(t('openCard'))}: ${escape(card.name)}" class="${cardDisplay === 'list' ? 'list-card' : `membership-card ${cardDisplay === 'compact' ? 'compact-card' : ''}`}" style="--color-one:${card.colors[0]};--color-two:${card.colors[1]}">${content}</a>`;
 }
 function renderList(): void {
-  const categories = [...new Set(snapshot.cards.map((card) => card.category))].sort((a, b) => a.localeCompare(b, language));
-  for (const category of selectedCategories) if (!categories.includes(category)) selectedCategories.delete(category);
   shell(`<section class="page-heading"><div><p class="eyebrow">${escape(t('localNote'))}</p><h1 tabindex="-1">${escape(t('yourCards'))}<span class="count">${snapshot.cards.length}</span></h1></div>
     ${button('new', `${icon('plus')}${escape(t('addCard'))}`, 'button primary desktop-add')}</section>
     <section id="nearby-controls" aria-label="${escape(t('nearbyTitle'))}">${nearbyControlsHtml()}</section>
     ${snapshot.cards.length ? `<label class="search-box">${icon('search')}<input id="search" type="search" maxlength="100" placeholder="${escape(t('search'))}" aria-label="${escape(t('search'))}" value="${escape(search)}" autocomplete="off"></label>
-      <div class="category-filters" role="group" aria-label="${escape(t('categoryFilters'))}">${categories.map((category) => button('filter-category', escape(category || t('noCategory')), 'category-filter', `data-category="${escape(category)}" aria-pressed="${selectedCategories.has(category)}"`)).join('')}</div>
       <div id="card-grid">${listHtml()}</div>` : `<section class="empty-state">
       <img src="${import.meta.env.BASE_URL}branding/cards.webp" width="300" height="300" alt="" fetchpriority="low">
       <p class="eyebrow">${escape(t('tagline'))}</p><h2>${escape(t('emptyTitle')).replace('\n', '<br>')}</h2><p>${escape(t('emptyText'))}</p>
@@ -406,7 +421,7 @@ function renderSettings(): void {
   shell(`<section class="page-heading"><div><p class="eyebrow">MY MEMBERSHIPS</p><h1 tabindex="-1">${escape(t('settings'))}</h1></div></section>
     <section class="panel about-panel">${icon('shield')}<h2>${escape(t('aboutTitle'))}</h2><p>${escape(t('aboutText'))}</p></section>
     <section class="panel"><label class="field"><span>${escape(t('language'))}</span><select id="language"><option value="en" ${language === 'en' ? 'selected' : ''}>English</option><option value="de" ${language === 'de' ? 'selected' : ''}>Deutsch</option></select></label>
-      <label class="preview-toggle"><span>${escape(t('compactCards'))}</span><input type="checkbox" role="switch" id="compact-cards" ${compactCards ? 'checked' : ''}></label></section>
+      <label class="field"><span>${escape(t('cardDisplay'))}</span><select id="card-display">${CARD_DISPLAYS.map((display) => `<option value="${display}" ${cardDisplay === display ? 'selected' : ''}>${escape(t(display))}</option>`).join('')}</select></label></section>
     <section class="panel"><h2>${escape(t('nearbyTitle'))}</h2><p id="location-state" aria-live="polite">${locationStateHtml()}</p>
       <p>${escape(t('nearbyPrivacy'))}</p><div id="nearby-controls">${nearbyControlsHtml()}</div></section>
     <section class="panel"><h2>${escape(t('backupTitle'))}</h2><p>${escape(t('backupText'))}</p><p class="hint">${escape(t('backupWarning'))}</p>
@@ -536,14 +551,15 @@ app.addEventListener('change', (event) => {
     language = input.value;
     render();
   });
-  if (input.id === 'compact-cards' && input instanceof HTMLInputElement) {
-    const enabled = input.checked;
+  if (input.id === 'card-display' && input instanceof HTMLSelectElement) {
+    const display = input.value;
+    if (!isCardDisplay(display)) { report(new WalletError('storage')); input.value = cardDisplay; return; }
     input.disabled = true;
     void run(async () => {
       if (!store) throw new WalletError('storage');
-      await store.setCompactCards(enabled);
-      compactCards = enabled;
-    }).finally(() => { input.checked = compactCards; input.disabled = false; });
+      await store.setCardDisplay(display);
+      cardDisplay = display;
+    }).finally(() => { input.value = cardDisplay; input.disabled = false; });
   }
   if (input.id === 'restore-file' && input instanceof HTMLInputElement) {
     const file = input.files?.[0];
@@ -591,15 +607,7 @@ app.addEventListener('click', (event) => {
     render();
   });
   if (action === 'dismiss') { notice = null; document.querySelector('#notices')?.replaceChildren(); }
-  if (action === 'filter-category') {
-    const category = target.dataset.category;
-    if (category === undefined) return;
-    if (selectedCategories.has(category)) selectedCategories.delete(category); else selectedCategories.add(category);
-    target.setAttribute('aria-pressed', String(selectedCategories.has(category)));
-    const grid = document.querySelector('#card-grid');
-    if (grid) grid.innerHTML = listHtml();
-  }
-  if (action === 'clear-search') { search = ''; selectedCategories.clear(); renderList(); document.querySelector<HTMLInputElement>('#search')?.focus(); }
+  if (action === 'clear-search') { search = ''; renderList(); document.querySelector<HTMLInputElement>('#search')?.focus(); }
   if (action === 'remove-location') { target.closest('.location-row')?.remove(); dirty = true; }
   if (action === 'delete' && confirm(t('deleteConfirm'))) void run(async () => {
     const card = currentCard();
@@ -681,7 +689,7 @@ async function start(): Promise<void> {
     });
     snapshot = await store.read();
     language = await store.language() ?? language;
-    compactCards = await store.compactCards() ?? false;
+    cardDisplay = await store.cardDisplay();
     nearbyEnabled = await store.nearbyEnabled();
     if (nearbyEnabled === false) locationMessage = 'nearbyDisabled';
     route = location.hash.slice(1);

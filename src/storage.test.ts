@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WalletStore } from './storage';
+import { openDB } from 'idb';
 import type { Card } from './model';
 
 const card: Card = {
@@ -15,24 +16,43 @@ async function open(name = crypto.randomUUID()): Promise<WalletStore> {
 }
 afterEach(() => { connections.splice(0).forEach((store) => store.close()); });
 describe('transactional wallet storage', () => {
-  it('remembers compact previews independently of wallet replacement and other preferences', async () => {
+  it('remembers display choices independently of wallet replacement and other preferences', async () => {
     const name = crypto.randomUUID();
     const first = await open(name);
-    expect(await first.compactCards()).toBeUndefined();
-    await first.setCompactCards(true);
+    expect(await first.cardDisplay()).toBe('standard');
+    await first.setCardDisplay('compact');
     await first.setLanguage('de');
     await first.setNearbyEnabled(false);
     await first.replace([card], 0);
     first.close();
     const second = await open(name);
-    expect(await second.compactCards()).toBe(true);
+    expect(await second.cardDisplay()).toBe('compact');
+    await second.setCardDisplay('list');
     await second.replace([], 1);
-    expect(await second.compactCards()).toBe(true);
+    expect(await second.cardDisplay()).toBe('list');
     expect(await second.language()).toBe('de');
     expect(await second.nearbyEnabled()).toBe(false);
-    await second.setCompactCards(false);
     second.close();
-    expect(await (await open(name)).compactCards()).toBe(false);
+    const third = await open(name);
+    expect(await third.cardDisplay()).toBe('list');
+    await third.setCardDisplay('standard');
+    expect(await (await open(name)).cardDisplay()).toBe('standard');
+  });
+  it.each([true, false])('preserves the legacy compact preference %s until a new display is selected', async (legacy) => {
+    const name = crypto.randomUUID();
+    const store = await open(name);
+    const db = await openDB(name, 1);
+    try { await db.put('preferences', legacy, 'compact-cards'); } finally { db.close(); }
+    expect(await store.cardDisplay()).toBe(legacy ? 'compact' : 'standard');
+    await store.setCardDisplay('list');
+    expect(await (await open(name)).cardDisplay()).toBe('list');
+  });
+  it.each(['card-display', 'compact-cards'])('reports invalid stored %s values', async (key) => {
+    const name = crypto.randomUUID();
+    const store = await open(name);
+    const db = await openDB(name, 1);
+    try { await db.put('preferences', 'invalid', key); } finally { db.close(); }
+    await expect(store.cardDisplay()).rejects.toThrow('storage');
   });
   it('remembers both location opt-in and refusal independently from wallet replacement and language', async () => {
     const name = crypto.randomUUID();

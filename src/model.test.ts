@@ -59,6 +59,17 @@ describe('wallet data and backups', () => {
     expect(sortCards(cards, 'en', ' ZEB ').map((card) => card.id)).toEqual(['z']);
     expect(cards[0]?.id).toBe('z');
   });
+  it('searches categories as well as names without duplicates or joining fields', () => {
+    const cards = [
+      exampleCard({ id: 'z', name: 'Zebra', category: 'Shopping & Rewards' }),
+      exampleCard({ id: 'a', name: 'Shopping club', category: 'Shopping & Rewards' }),
+      exampleCard({ id: 'b', name: 'Books', category: '' }),
+    ];
+    expect(sortCards(cards, 'en', ' SHOPPING ').map((card) => card.id)).toEqual(['a', 'z']);
+    expect(sortCards(cards, 'de', 'rewards').map((card) => card.id)).toEqual(['a', 'z']);
+    expect(sortCards(cards, 'en', 'books').map((card) => card.id)).toEqual(['b']);
+    expect(sortCards(cards, 'en', 'ZebraShopping')).toEqual([]);
+  });
 });
 describe('barcodes', () => {
   it.each([

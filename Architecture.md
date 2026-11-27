@@ -13,10 +13,11 @@ The primary experience is using a phone at the store, either in a mobile browser
 
 ## Agreed MVP scope
 
-- Manual card creation, editing, and deletion; a card list with name search and alphabetical ordering; and a card detail view with barcode display.
+- Manual card creation, editing, and deletion; a wallet with name/category search and locale-aware ordering; and a card detail view with barcode display. Large cards hide categories; small cards and list rows group cards under category headings (including a localized heading for uncategorized cards), sorting categories and their cards by locale. All three views apply to nearby and complete card sections without category filter buttons.
 - IndexedDB persistence, an offline app shell, PWA installation where supported, and the app's own JSON backup/restore. Opt-in nearby ordering and local camera scanning are implemented enhancements. Other-wallet imports, nearby-business discovery, and cloud sync remain later features.
 - English and German interfaces from the first release. Keep UI strings translatable and use locale-aware sorting and date display; do not translate user-entered card data.
 - An optional user-entered category with suggestions from categories already in the wallet. Dedicated category management, favorites, and custom ordering are deferred.
+- Store the three-way display preference locally in IndexedDB, separately from wallet backups. Default to large cards and honor the previous compact-preview preference when no new display preference exists.
 - Optional saved locations captured from the device when viewing a saved card with location enabled. No manual coordinate entry. Labels remain editable and saved locations can be removed. Map selection and address search are deferred; creating a card must not require a location or location permission.
 - Manual barcode entry with an explicit format selector. Initially support Code 128, Code 39, EAN-13, EAN-8, QR, and Aztec. Default the barcode value to the membership number while allowing a separate value. Validate the selected format rather than guessing it or silently substituting another format. Cards without a barcode remain valid.
 
